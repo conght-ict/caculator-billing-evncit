@@ -216,10 +216,28 @@ public class BillingService {
         }
 
         try {
-            // 1. Lấy chỉ số sử dụng đo đếm đã hợp lệ (VALIDATED)
-            List<MeterUsage> usages = meterUsageRepository.findByAccountIdAndBillingCycleMonthAndStatus(accountId, month, "VALIDATED");
+            // 1. Lấy chỉ số sử dụng đo đếm đã hợp lệ (VALIDATED) từ payload Kafka để tránh đọc DB
+            List<MeterUsage> usages = new ArrayList<>();
+            if (task.getReadings() != null && !task.getReadings().isEmpty()) {
+                for (com.evn.billing.worker.dto.MeterReadingDto r : task.getReadings()) {
+                    MeterUsage u = new MeterUsage();
+                    u.setMeterPointId(r.getMeterPointId());
+                    u.setFromDate(r.getFromDate());
+                    u.setToDate(r.getToDate());
+                    u.setStartIndex(r.getStartIndex());
+                    u.setEndIndex(r.getEndIndex());
+                    u.setConsumption(r.getConsumption());
+                    u.setAccountId(accountId);
+                    u.setBillingCycleMonth(month);
+                    u.setStatus("VALIDATED");
+                    usages.add(u);
+                }
+            } else {
+                // Fallback to database query if no readings provided in Kafka payload (e.g. REST fallback)
+                usages = meterUsageRepository.findByAccountIdAndBillingCycleMonthAndStatus(accountId, month, "VALIDATED");
+            }
             if (usages.isEmpty()) {
-                throw new NoSuchElementException("No validated meter usage found for account: " + accountId);
+                throw new NoSuchElementException("No validated meter usage found/provided for account: " + accountId);
             }
 
             // Determine actual billing period length (daysUsed)
@@ -433,10 +451,28 @@ public class BillingService {
             }
 
             try {
-                // 1. Lấy chỉ số sử dụng đo đếm đã hợp lệ (VALIDATED)
-                List<MeterUsage> usages = meterUsageRepository.findByAccountIdAndBillingCycleMonthAndStatus(accountId, month, "VALIDATED");
+                // 1. Lấy chỉ số sử dụng đo đếm đã hợp lệ (VALIDATED) từ payload Kafka để tránh đọc DB
+                List<MeterUsage> usages = new ArrayList<>();
+                if (task.getReadings() != null && !task.getReadings().isEmpty()) {
+                    for (com.evn.billing.worker.dto.MeterReadingDto r : task.getReadings()) {
+                        MeterUsage u = new MeterUsage();
+                        u.setMeterPointId(r.getMeterPointId());
+                        u.setFromDate(r.getFromDate());
+                        u.setToDate(r.getToDate());
+                        u.setStartIndex(r.getStartIndex());
+                        u.setEndIndex(r.getEndIndex());
+                        u.setConsumption(r.getConsumption());
+                        u.setAccountId(accountId);
+                        u.setBillingCycleMonth(month);
+                        u.setStatus("VALIDATED");
+                        usages.add(u);
+                    }
+                } else {
+                    // Fallback to database query if no readings provided in Kafka payload (e.g. REST fallback)
+                    usages = meterUsageRepository.findByAccountIdAndBillingCycleMonthAndStatus(accountId, month, "VALIDATED");
+                }
                 if (usages.isEmpty()) {
-                    throw new NoSuchElementException("No validated meter usage found for account: " + accountId);
+                    throw new NoSuchElementException("No validated meter usage found/provided for account: " + accountId);
                 }
 
                 // Determine actual billing period length (daysUsed)

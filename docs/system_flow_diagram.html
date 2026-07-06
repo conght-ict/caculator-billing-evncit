@@ -1,0 +1,1728 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EVN Distributed Billing System - Sơ Đồ Luồng Xử Lý</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0b0f19;
+            --bg-card: rgba(17, 24, 39, 0.7);
+            --border-glow: rgba(59, 130, 246, 0.2);
+            --primary: #3b82f6;
+            --primary-glow: rgba(59, 130, 246, 0.5);
+            --secondary: #a855f7;
+            --secondary-glow: rgba(168, 85, 247, 0.5);
+            --accent: #06b6d4;
+            --accent-glow: rgba(6, 182, 212, 0.5);
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.3);
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --font-main: 'Outfit', sans-serif;
+            --font-mono: 'Space Grotesk', sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: var(--font-main);
+            overflow-x: hidden;
+            background-image: 
+                radial-gradient(at 10% 20%, rgba(59, 130, 246, 0.1) 0px, transparent 50%),
+                radial-gradient(at 90% 80%, rgba(168, 85, 247, 0.08) 0px, transparent 50%);
+            background-attachment: fixed;
+        }
+
+        .header {
+            background: rgba(15, 23, 42, 0.6);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 1.5rem 3rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-title-container {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .logo {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 1.5rem;
+            color: white;
+            box-shadow: 0 0 20px var(--primary-glow);
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(to right, #ffffff, #93c5fd, #c084fc);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header p {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            margin-top: 0.2rem;
+        }
+
+        .navigation {
+            display: flex;
+            gap: 0.5rem;
+            background: rgba(0, 0, 0, 0.2);
+            padding: 0.3rem;
+            border-radius: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .nav-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 0.5rem 1.2rem;
+            border-radius: 20px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            font-family: var(--font-main);
+            font-size: 0.9rem;
+        }
+
+        .nav-btn:hover {
+            color: white;
+        }
+
+        .nav-btn.active {
+            background: linear-gradient(135deg, var(--primary), var(--accent));
+            color: white;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);
+        }
+
+        .container {
+            max-width: 1750px;
+            width: 96%;
+            margin: 2rem auto;
+            padding: 0 1.5rem;
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.5s ease;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Glass Card style */
+        .card {
+            background: var(--bg-card);
+            border-radius: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(16px);
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(to right, transparent, var(--primary-glow), transparent);
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 2rem;
+        }
+
+        .grid-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 1.5rem;
+        }
+
+        /* Interactive Diagram Styles */
+        .diagram-container {
+            background: rgba(8, 12, 21, 0.9);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            position: relative;
+            height: 520px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: inset 0 0 40px rgba(0,0,0,0.8);
+        }
+
+        .workflow-selector {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .wf-btn {
+            background: rgba(30, 41, 59, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            color: var(--text-muted);
+            padding: 0.6rem 1.2rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: all 0.3s;
+            font-family: var(--font-main);
+            font-size: 0.85rem;
+        }
+
+        .wf-btn:hover {
+            border-color: var(--primary);
+            color: white;
+            background: rgba(30, 41, 59, 0.8);
+        }
+
+        .wf-btn.active {
+            border-color: var(--accent);
+            color: white;
+            background: rgba(6, 182, 212, 0.15);
+            box-shadow: 0 0 15px rgba(6, 182, 212, 0.2);
+        }
+
+        /* SVG Canvas elements styling */
+        .node-group {
+            cursor: pointer;
+        }
+
+        .node-bg {
+            fill: #111827;
+            stroke: #374151;
+            stroke-width: 2px;
+            transition: all 0.3s;
+            rx: 10px;
+        }
+
+        .node-group:hover .node-bg {
+            stroke: var(--primary);
+            filter: drop-shadow(0 0 8px var(--primary-glow));
+            fill: #1f2937;
+        }
+
+        .node-group.active-node .node-bg {
+            stroke: var(--accent);
+            fill: rgba(6, 182, 212, 0.1);
+            filter: drop-shadow(0 0 10px var(--accent-glow));
+        }
+
+        .node-title {
+            fill: white;
+            font-size: 11px;
+            font-weight: 600;
+            font-family: var(--font-main);
+        }
+
+        .node-subtitle {
+            fill: var(--text-muted);
+            font-size: 8.5px;
+            font-family: var(--font-mono);
+        }
+
+        .flow-line {
+            fill: none;
+            stroke: #374151;
+            stroke-width: 2;
+            transition: all 0.3s ease;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .flow-line.active-write {
+            stroke: var(--success);
+            stroke-width: 3;
+            filter: drop-shadow(0 0 4px var(--success-glow));
+            stroke-dasharray: 8, 4;
+            animation: dash 30s linear infinite;
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .flow-line.active-read {
+            stroke: var(--accent);
+            stroke-width: 3;
+            filter: drop-shadow(0 0 4px var(--accent-glow));
+            stroke-dasharray: 8, 4;
+            animation: dash 30s linear infinite;
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .flow-line.active-trigger {
+            stroke: var(--secondary);
+            stroke-width: 3;
+            filter: drop-shadow(0 0 4px var(--secondary-glow));
+            stroke-dasharray: 8, 4;
+            animation: dash 30s linear infinite;
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        @keyframes dash {
+            to {
+                stroke-dashoffset: -1000;
+            }
+        }
+
+        /* Detail side panel */
+        .info-panel {
+            background: rgba(15, 23, 42, 0.9);
+            border-left: 1px solid rgba(255, 255, 255, 0.08);
+            padding: 1.5rem;
+            overflow-y: auto;
+            height: 100%;
+        }
+
+        .info-header {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.8rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .info-icon {
+            width: 32px;
+            height: 32px;
+            background: rgba(59, 130, 246, 0.1);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--primary);
+            border: 1px solid var(--border-glow);
+        }
+
+        .code-block {
+            background: #030712;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 1rem;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.85rem;
+            color: #38bdf8;
+            overflow-x: auto;
+            margin-top: 1rem;
+        }
+
+        /* Simulator Styles */
+        .sim-input-group {
+            margin-bottom: 1.2rem;
+        }
+
+        .sim-input-group label {
+            display: block;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+        }
+
+        .sim-input {
+            width: 100%;
+            background: rgba(30, 41, 59, 0.5);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px;
+            color: white;
+            padding: 0.75rem 1rem;
+            font-size: 1rem;
+            font-family: var(--font-main);
+            transition: all 0.3s;
+        }
+
+        .sim-input:focus {
+            border-color: var(--primary);
+            outline: none;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.25);
+        }
+
+        .sim-btn {
+            width: 100%;
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            border: none;
+            border-radius: 8px;
+            color: white;
+            padding: 0.9rem;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            box-shadow: 0 4px 15px rgba(59, 130, 246, 0.2);
+            font-family: var(--font-main);
+        }
+
+        .sim-btn:hover {
+            opacity: 0.95;
+            transform: translateY(-1px);
+        }
+
+        .sim-results {
+            background: rgba(15, 23, 42, 0.8);
+            border-radius: 12px;
+            padding: 1.5rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .result-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.6rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .result-row:last-child {
+            border-bottom: none;
+            padding-top: 1rem;
+        }
+
+        .result-value {
+            font-family: var(--font-mono);
+            font-weight: 600;
+            color: white;
+        }
+
+        .result-value.highlight {
+            color: var(--accent);
+            font-size: 1.25rem;
+        }
+
+        .result-value.total {
+            color: var(--success);
+            font-size: 1.5rem;
+        }
+
+        .result-bar-chart {
+            margin-top: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .chart-bar-container {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .chart-label {
+            width: 80px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        .chart-bar-outer {
+            flex-grow: 1;
+            height: 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .chart-bar-inner {
+            height: 100%;
+            background: linear-gradient(to right, var(--primary), var(--accent));
+            border-radius: 6px;
+            width: 0%;
+            transition: width 0.8s cubic-bezier(0.1, 0.8, 0.3, 1);
+        }
+
+        .chart-val {
+            width: 60px;
+            font-size: 0.85rem;
+            font-family: var(--font-mono);
+            text-align: right;
+        }
+
+        /* Database schema visualizer */
+        .db-table {
+            background: rgba(30, 41, 59, 0.4);
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            overflow: hidden;
+            transition: all 0.3s;
+        }
+
+        .db-table:hover {
+            border-color: var(--primary);
+            box-shadow: 0 8px 25px rgba(59, 130, 246, 0.1);
+        }
+
+        .db-table-header {
+            background: rgba(59, 130, 246, 0.1);
+            padding: 0.75rem 1.2rem;
+            font-weight: 600;
+            font-family: var(--font-mono);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .db-table-rows {
+            padding: 0.8rem 1.2rem;
+        }
+
+        .db-row {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            padding: 0.4rem 0;
+        }
+
+        .db-col-name {
+            font-family: var(--font-mono);
+            color: #e5e7eb;
+        }
+
+        .db-col-type {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+        }
+
+        .pk-icon {
+            color: var(--warning);
+            margin-right: 4px;
+        }
+
+        .fk-icon {
+            color: var(--accent);
+            margin-right: 4px;
+        }
+
+        /* Dashboard Monitor Styles */
+        .metric-card {
+            background: rgba(17, 24, 39, 0.4);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            position: relative;
+        }
+
+        .metric-title {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .metric-value {
+            font-size: 2.2rem;
+            font-weight: 700;
+            font-family: var(--font-mono);
+            margin: 0.5rem 0;
+            background: linear-gradient(135deg, white, var(--text-muted));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .metric-value.color-primary {
+            background: linear-gradient(135deg, white, var(--primary));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .metric-value.color-accent {
+            background: linear-gradient(135deg, white, var(--accent));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .metric-value.color-success {
+            background: linear-gradient(135deg, white, var(--success));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .metric-footer {
+            font-size: 0.8rem;
+            color: var(--success);
+            display: flex;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .metric-footer.down {
+            color: var(--danger);
+        }
+
+        /* Subtitle banner */
+        .section-header {
+            margin-bottom: 1.5rem;
+        }
+
+        .section-header h2 {
+            font-size: 1.5rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .section-header h2 span {
+            width: 4px;
+            height: 24px;
+            background: var(--accent);
+            border-radius: 2px;
+            display: inline-block;
+        }
+
+        .section-header p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+            margin-top: 0.3rem;
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 0.25rem 0.6rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .tag.primary { background: rgba(59, 130, 246, 0.15); color: var(--primary); border: 1px solid rgba(59, 130, 246, 0.3); }
+        .tag.success { background: rgba(16, 185, 129, 0.15); color: var(--success); border: 1px solid rgba(16, 185, 129, 0.3); }
+        .tag.accent { background: rgba(6, 182, 212, 0.15); color: var(--accent); border: 1px solid rgba(6, 182, 212, 0.3); }
+        .tag.secondary { background: rgba(168, 85, 247, 0.15); color: var(--secondary); border: 1px solid rgba(168, 85, 247, 0.3); }
+        .tag.warning { background: rgba(245, 158, 11, 0.15); color: var(--warning); border: 1px solid rgba(245, 158, 11, 0.3); }
+    </style>
+</head>
+<body>
+
+    <!-- Header Section -->
+    <header class="header">
+        <div class="header-title-container">
+            <div class="logo">⚡</div>
+            <div>
+                <h1>Hệ Thống Tính Cước Phân Tán EVN</h1>
+                <p>Mô hình Kiến trúc & Luồng xử lý dữ liệu chi tiết (Real-time Flow)</p>
+            </div>
+        </div>
+        
+        <nav class="navigation">
+            <button class="nav-btn active" onclick="switchTab('diagram')">Sơ Đồ Luồng Xử Lý</button>
+            <button class="nav-btn" onclick="switchTab('simulator')">Giả Lập Tính Toán</button>
+            <button class="nav-btn" onclick="switchTab('database')">Kiến Trúc Dữ Liệu</button>
+            <button class="nav-btn" onclick="switchTab('dashboard')">Giám Sát Vận Hành</button>
+        </nav>
+    </header>
+
+    <div class="container">
+        
+        <!-- ================== TAB 1: INTERACTIVE DIAGRAMS ================== -->
+        <section id="tab-diagram" class="tab-content active">
+            <div class="workflow-selector">
+                <button class="wf-btn active" onclick="activateWorkflow(1)">Luồng 1: Tính Cước Cuốn Chiếu (Kafka Ingest)</button>
+                <button class="wf-btn" onclick="activateWorkflow(2)">Luồng 2: Chốt Sổ Hàng Loạt (Spring Batch)</button>
+                <button class="wf-btn" onclick="activateWorkflow(3)">Luồng 3: On-Demand Fallback (Đồng Bộ REST)</button>
+                <button class="wf-btn" onclick="activateWorkflow(4)">Luồng 4: Đồng Bộ Dữ Liệu Tĩnh (CMIS Master Data Sync)</button>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 280px 1fr 320px; gap: 1.5rem; align-items: stretch; height: calc(100vh - 240px); min-height: 530px; margin-bottom: 2rem;">
+                
+                <!-- Left Column: Object / Node Details Panel -->
+                <div class="card" style="margin-bottom: 0; padding: 0; height: 100%; display: flex; flex-direction: column;">
+                    <div id="node-info" class="info-panel" style="border-left: none; border-right: 1px solid rgba(255, 255, 255, 0.08); height: 100%; overflow-y: auto;">
+                        <div class="info-header">
+                            <div class="info-icon" style="color: var(--accent); border-color: var(--accent-glow); background: rgba(6, 182, 212, 0.1);">⚡</div>
+                            <div>
+                                <h3 id="node-title" style="font-size: 1.05rem; font-weight: 600;">Chi tiết cấu phần</h3>
+                                <span id="node-tag" class="tag accent">Thiết bị</span>
+                            </div>
+                        </div>
+                        <p id="node-desc" style="color: var(--text-muted); line-height: 1.6; font-size: 0.9rem; margin-bottom: 1rem;">
+                            Bấm trực tiếp vào các đối tượng thiết bị trên sơ đồ (ví dụ: CMIS System, Mediation Service, Redis, Worker, v.v.) để xem chức năng chi tiết và cấu trúc mã nguồn tương ứng tại đây.
+                        </p>
+                        <div id="node-code-section" style="display:none;">
+                            <h4 style="font-size: 0.85rem; font-weight: 600; margin-bottom: 0.5rem;">Đoạn mã cấu trúc:</h4>
+                            <pre id="node-code" class="code-block" style="margin-top: 0.5rem; font-size: 0.72rem;"></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Center Column: SVG Canvas -->
+                <div class="diagram-container" style="height: 100%; margin-bottom: 0;">
+                    <svg width="100%" height="100%" viewBox="0 0 750 500" style="background:#090d16;">
+                        <defs>
+                            <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                <path d="M 0 0 L 10 5 L 0 10 z" fill="#374151" />
+                            </marker>
+                            <marker id="arrow-write" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                <path d="M 0 0 L 10 5 L 0 10 z" fill="#10b981" />
+                            </marker>
+                            <marker id="arrow-read" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                <path d="M 0 0 L 10 5 L 0 10 z" fill="#06b6d4" />
+                            </marker>
+                            <marker id="arrow-trigger" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                <path d="M 0 0 L 10 5 L 0 10 z" fill="#a855f7" />
+                            </marker>
+                        </defs>
+
+                        <!-- GRID BACKDROP -->
+                        <g opacity="0.05">
+                            <path d="M 0,50 L 750,50 M 0,100 L 750,100 M 0,150 L 750,150 M 0,200 L 750,200 M 0,250 L 750,250 M 0,300 L 750,300 M 0,350 L 750,350 M 0,400 L 750,400 M 0,450 L 750,450" stroke="white" stroke-width="1"/>
+                            <path d="M 50,0 L 50,500 M 100,0 L 100,500 M 150,0 L 150,500 M 200,0 L 200,500 M 250,0 L 250,500 M 300,0 L 300,500 M 350,0 L 350,500 M 400,0 L 400,500 M 450,0 L 450,500 M 500,0 L 500,500 M 550,0 L 550,500 M 600,0 L 600,500 M 650,0 L 650,500 M 700,0 L 700,500" stroke="white" stroke-width="1"/>
+                        </g>
+
+                        <!-- FLOW LINES -->
+                        <!-- Luồng 1 lines: Ingestion -->
+                        <path id="line1-1" d="M 120,75 L 160,75" class="flow-line" marker-end="url(#arrow)" />
+                        <path id="line1-2" d="M 325,75 L 370,75" class="flow-line" marker-end="url(#arrow)" />
+                        <path id="line1-3" d="M 370,75 Q 340,155 370,235" class="flow-line" marker-end="url(#arrow)" />
+                        <path id="line1-4" d="M 535,75 Q 565,195 535,315" class="flow-line" marker-end="url(#arrow)" />
+                        <path id="line1-5" d="M 535,75 L 570,160" class="flow-line" marker-end="url(#arrow)" />
+                        <!-- Worker processing -->
+                        <path id="line1-6" d="M 650,200 L 650,250" class="flow-line" marker-end="url(#arrow)" />
+                        <path id="line1-7" d="M 570,275 L 535,235" class="flow-line" marker-end="url(#arrow)" />
+                        <path id="line1-8" d="M 570,275 L 535,315" class="flow-line" marker-end="url(#arrow)" />
+                        <!-- Outbox & CDC -->
+                        <path id="line1-9" d="M 452.5,340 L 452.5,370" class="flow-line" marker-end="url(#arrow)" />
+                        <path id="line1-10" d="M 370,395 L 325,395" class="flow-line" marker-end="url(#arrow)" />
+                        <path id="line1-11" d="M 160,395 L 120,395" class="flow-line" marker-end="url(#arrow)" />
+
+                        <!-- Luồng 2 lines: Batch Orchestrator (Event driven from CMIS via Kafka) -->
+                        <path id="line2-trigger-1" d="M 120,155 L 160,155" class="flow-line" marker-end="url(#arrow)" />
+                        <path id="line2-trigger-2" d="M 325,155 L 370,155" class="flow-line" marker-end="url(#arrow)" />
+                        <path id="line2-1" d="M 535,155 Q 555,235 535,315" class="flow-line" marker-end="url(#arrow)" />
+                        <path id="line2-2" d="M 450,180 L 450,210" class="flow-line" marker-end="url(#arrow)" />
+                        <path id="line2-3" d="M 535,155 L 570,175" class="flow-line" marker-end="url(#arrow)" />
+
+                        <!-- Luồng 3 lines: REST On-Demand -->
+                        <path id="line3-1" d="M 120,60 Q 245,10 370,60" class="flow-line" marker-end="url(#arrow)" />
+                        <path id="line3-2" d="M 535,75 L 570,260" class="flow-line" marker-end="url(#arrow)" />
+
+                        <!-- Luồng 4 lines: Master Data Sync -->
+                        <path id="line4-1" d="M 120,235 L 160,235" class="flow-line" marker-end="url(#arrow)" />
+                        <path id="line4-2" d="M 325,235 L 370,315" class="flow-line" marker-end="url(#arrow)" />
+                        <path id="line4-3" d="M 325,235 L 370,235" class="flow-line" marker-end="url(#arrow)" />
+
+                        <!-- NODES -->
+                        <!-- 1. CMIS / AMR -->
+                        <g id="node-cmis" class="node-group" onclick="showNodeDetails('cmis')">
+                            <rect x="20" y="50" width="100" height="370" class="node-bg" />
+                            <text x="70" y="230" class="node-title" text-anchor="middle">CMIS System</text>
+                            <text x="70" y="250" class="node-subtitle" text-anchor="middle">Hệ thống Core</text>
+                        </g>
+
+                        <!-- COLUMN 2: KAFKA INPUT/OUTPUT TOPICS -->
+                        <!-- 2. Kafka Topic: Readings -->
+                        <g id="node-kafka-readings" class="node-group" onclick="showNodeDetails('kafka-readings')">
+                            <rect x="160" y="50" width="165" height="50" class="node-bg" />
+                            <text x="242.5" y="75" class="node-title" text-anchor="middle">Kafka: readings-input</text>
+                            <text x="242.5" y="90" class="node-subtitle" text-anchor="middle">Nhận chỉ số thô</text>
+                        </g>
+
+                        <!-- 3. Kafka Topic: Batch Trigger -->
+                        <g id="node-kafka-batch" class="node-group" onclick="showNodeDetails('kafka-batch')">
+                            <rect x="160" y="130" width="165" height="50" class="node-bg" />
+                            <text x="242.5" y="155" class="node-title" text-anchor="middle">Kafka: batch-requests</text>
+                            <text x="242.5" y="170" class="node-subtitle" text-anchor="middle">Kích hoạt chốt cước</text>
+                        </g>
+
+                        <!-- 4. Kafka Topic: Master Data Sync -->
+                        <g id="node-kafka-sync" class="node-group" onclick="showNodeDetails('kafka-sync')">
+                            <rect x="160" y="210" width="165" height="50" class="node-bg" />
+                            <text x="242.5" y="235" class="node-title" text-anchor="middle">Kafka: sync-topic</text>
+                            <text x="242.5" y="250" class="node-subtitle" text-anchor="middle">CMIS Changes Sync</text>
+                        </g>
+
+                        <!-- 5. Kafka Topic: Outbound Invoice -->
+                        <g id="node-kafka-outbound" class="node-group" onclick="showNodeDetails('kafka-outbound')">
+                            <rect x="160" y="370" width="165" height="50" class="node-bg" />
+                            <text x="242.5" y="395" class="node-title" text-anchor="middle">Kafka: invoice-outbound</text>
+                            <text x="242.5" y="410" class="node-subtitle" text-anchor="middle">Đẩy hóa đơn về CMIS</text>
+                        </g>
+
+                        <!-- COLUMN 3: INTERNAL STACK -->
+                        <!-- 6. Mediation Service -->
+                        <g id="node-mediation" class="node-group" onclick="showNodeDetails('mediation')">
+                            <rect x="370" y="50" width="165" height="50" class="node-bg" />
+                            <text x="452.5" y="75" class="node-title" text-anchor="middle">Mediation Service</text>
+                            <text x="452.5" y="90" class="node-subtitle" text-anchor="middle">CmisIngestionListener</text>
+                        </g>
+
+                        <!-- 7. Batch Orchestrator -->
+                        <g id="node-orchestrator" class="node-group" onclick="showNodeDetails('orchestrator')">
+                            <rect x="370" y="130" width="165" height="50" class="node-bg" />
+                            <text x="452.5" y="155" class="node-title" text-anchor="middle">Batch Orchestrator</text>
+                            <text x="452.5" y="170" class="node-subtitle" text-anchor="middle">Spring Batch Master</text>
+                        </g>
+
+                        <!-- 8. Redis Cache -->
+                        <g id="node-redis" class="node-group" onclick="showNodeDetails('redis')">
+                            <rect x="370" y="210" width="165" height="50" class="node-bg" />
+                            <text x="452.5" y="235" class="node-title" text-anchor="middle">Redis Cluster</text>
+                            <text x="452.5" y="250" class="node-subtitle" text-anchor="middle">Snapshot Cache</text>
+                        </g>
+
+                        <!-- 9. Postgres / TiDB -->
+                        <g id="node-postgres" class="node-group" onclick="showNodeDetails('postgres')">
+                            <rect x="370" y="290" width="165" height="50" class="node-bg" />
+                            <text x="452.5" y="315" class="node-title" text-anchor="middle">Postgres / TiDB</text>
+                            <text x="452.5" y="330" class="node-subtitle" text-anchor="middle">Storage & meter_usage</text>
+                        </g>
+
+                        <!-- 10. Debezium / CDC -->
+                        <g id="node-cdc" class="node-group" onclick="showNodeDetails('cdc')">
+                            <rect x="370" y="370" width="165" height="50" class="node-bg" />
+                            <text x="452.5" y="395" class="node-title" text-anchor="middle">Debezium CDC</text>
+                            <text x="452.5" y="410" class="node-subtitle" text-anchor="middle">Outbox Reader</text>
+                        </g>
+
+                        <!-- COLUMN 4: COMPUTATIONAL LAYER -->
+                        <!-- 11. Kafka Topic: Execution -->
+                        <g id="node-kafka-execution" class="node-group" onclick="showNodeDetails('kafka-execution')">
+                            <rect x="570" y="150" width="160" height="50" class="node-bg" />
+                            <text x="650" y="175" class="node-title" text-anchor="middle">Kafka: execution</text>
+                            <text x="650" y="190" class="node-subtitle" text-anchor="middle">Nhận lệnh tính cước</text>
+                        </g>
+
+                        <!-- 12. Distributed Worker -->
+                        <g id="node-worker" class="node-group" onclick="showNodeDetails('worker')">
+                            <rect x="570" y="250" width="160" height="50" class="node-bg" />
+                            <text x="650" y="275" class="node-title" text-anchor="middle">Billing Worker</text>
+                            <text x="650" y="290" class="node-subtitle" text-anchor="middle">Loom Virtual Threads</text>
+                        </g>
+
+                        <!-- LEGEND -->
+                        <g transform="translate(520, 420)" opacity="0.85">
+                            <circle cx="15" cy="18" r="4" fill="#10b981" />
+                            <text x="25" y="21" fill="var(--text-muted)" font-size="10px" font-weight="500">Ghi / Lưu / Đẩy dữ liệu</text>
+                            
+                            <circle cx="15" cy="35" r="4" fill="#06b6d4" />
+                            <text x="25" y="38" fill="var(--text-muted)" font-size="10px" font-weight="500">Đọc / Truy vấn / Lấy dữ liệu</text>
+                            
+                            <circle cx="15" cy="52" r="4" fill="#a855f7" />
+                            <text x="25" y="55" fill="var(--text-muted)" font-size="10px" font-weight="500">Kích hoạt / Sự kiện / Gọi REST</text>
+                        </g>
+                    </svg>
+                </div>
+
+                <!-- Right Column: Workflow Info (Always Visible) -->
+                <div class="card" style="margin-bottom: 0; padding: 0; height: 100%;">
+                    <div id="wf-info" class="info-panel" style="height: 100%; overflow-y: auto;">
+                        <div class="info-header">
+                            <div class="info-icon" style="color: var(--primary); border-color: var(--primary-glow); background: rgba(59, 130, 246, 0.1);">💡</div>
+                            <div>
+                                <h3 id="wf-title" style="font-size: 1.1rem; font-weight: 600;">Hướng dẫn</h3>
+                                <span id="wf-tag" class="tag primary">Hệ thống</span>
+                            </div>
+                        </div>
+                        <p id="wf-desc" style="color: var(--text-muted); line-height: 1.6; font-size: 0.95rem;">
+                            Bấm vào các nút ở trên để xem cách dữ liệu vận hành qua từng luồng nghiệp vụ.
+                        </p>
+                        <div id="wf-extra" style="margin-top: 1.5rem;">
+                            <h4 style="font-size: 0.9rem; font-weight: 600; margin-bottom: 0.5rem;">Đặc tính luồng đang chọn:</h4>
+                            <ul id="wf-features" style="padding-left: 1.2rem; font-size: 0.9rem; color: var(--text-muted); line-height: 1.8;">
+                                <li>Tính cước tự động không cần người vận hành kích hoạt</li>
+                                <li>Tự động xác nhận đầy đủ điểm đo trong sơ đồ topology</li>
+                                <li>Phân phối xử lý bất đồng bộ qua hàng đợi Kafka</li>
+                            </ul>
+                        </div>
+                        <div id="wf-code-section" style="display:none; margin-top: 1.5rem;">
+                            <h4 style="font-size: 0.9rem; font-weight: 600;">Mã nguồn mẫu kích hoạt:</h4>
+                            <pre id="wf-code" class="code-block" style="margin-top: 0.5rem; font-size: 0.75rem;"></pre>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+
+        <!-- ================== TAB 2: INTERACTIVE SIMULATOR ================== -->
+        <section id="tab-simulator" class="tab-content">
+            <div class="grid-2">
+                <!-- Inputs Form -->
+                <div class="card">
+                    <div class="section-header">
+                        <h2><span></span>Giả Lập Cách Tính Cước EVN</h2>
+                        <p>Trải nghiệm thuật toán Netting Cây công tơ và Lũy kế Bậc thang sinh hoạt</p>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="sim-input-group">
+                            <label for="main-start">Chỉ số đầu Công tơ Tổng (kWh)</label>
+                            <input type="number" id="main-start" class="sim-input" value="1000">
+                        </div>
+                        <div class="sim-input-group">
+                            <label for="main-end">Chỉ số cuối Công tơ Tổng (kWh)</label>
+                            <input type="number" id="main-end" class="sim-input" value="1450">
+                        </div>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="sim-input-group">
+                            <label for="sub-start">Chỉ số đầu Công tơ Phụ (Netting)</label>
+                            <input type="number" id="sub-start" class="sim-input" value="200">
+                        </div>
+                        <div class="sim-input-group">
+                            <label for="sub-end">Chỉ số cuối Công tơ Phụ (Netting)</label>
+                            <input type="number" id="sub-end" class="sim-input" value="300">
+                        </div>
+                    </div>
+
+                    <div class="grid-2">
+                        <div class="sim-input-group">
+                            <label for="norms">Số hộ dùng chung (Hệ số Định mức)</label>
+                            <input type="number" id="norms" class="sim-input" value="1" min="1">
+                        </div>
+                        <div class="sim-input-group">
+                            <label for="proration">Số ngày thực tế sử dụng (trong tháng 30 ngày)</label>
+                            <input type="number" id="proration" class="sim-input" value="30" min="1" max="30">
+                        </div>
+                    </div>
+
+                    <button class="sim-btn" onclick="runSimulateCalculation()">Thực Thi Tính Cước</button>
+                </div>
+
+                <!-- Simulation Results -->
+                <div class="card" style="padding: 0; background: transparent; border: none; box-shadow: none;">
+                    <div class="sim-results">
+                        <div>
+                            <h3 style="font-size: 1.2rem; font-weight: 600; margin-bottom: 1.5rem; display:flex; align-items:center; gap:0.5rem;">
+                                <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background:var(--success);"></span>
+                                Kết Quả Tính Toán Giải Trình (Billing Manifest)
+                            </h3>
+                            
+                            <div class="result-row">
+                                <span>Sản lượng Công tơ Tổng:</span>
+                                <span class="result-value" id="res-main-cons">450.00 kWh</span>
+                            </div>
+                            <div class="result-row">
+                                <span>Sản lượng Công tơ Phụ (Bị Netting):</span>
+                                <span class="result-value" id="res-sub-cons">- 100.00 kWh</span>
+                            </div>
+                            <div class="result-row">
+                                <span>Điện thương phẩm thực tính (Net Consumption):</span>
+                                <span class="result-value highlight" id="res-net-cons">350.00 kWh</span>
+                            </div>
+                            <div class="result-row">
+                                <span>Định mức Bậc 1 áp dụng:</span>
+                                <span class="result-value" id="res-scaled-tier">0 - 50.00 kWh</span>
+                            </div>
+                            <div class="result-row">
+                                <span>Tổng tiền điện chưa thuế:</span>
+                                <span class="result-value highlight" id="res-before-tax">0.00 đ</span>
+                            </div>
+                            <div class="result-row">
+                                <span>Thuế GTGT (VAT 10%):</span>
+                                <span class="result-value" id="res-tax">0.00 đ</span>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="result-row" style="border-top: 1px solid rgba(255,255,255,0.1); padding-top:1.5rem;">
+                                <span style="font-size: 1.1rem; font-weight: 700;">TỔNG TIỀN THANH TOÁN:</span>
+                                <span class="result-value total" id="res-total">0.00 đ</span>
+                            </div>
+
+                            <!-- Bar Chart Visualizing steps usage -->
+                            <div class="result-bar-chart" id="res-chart">
+                                <!-- Dynamic bars will load here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================== TAB 3: DATABASE SCHEMA ================== -->
+        <section id="tab-database" class="tab-content">
+            <div class="section-header">
+                <h2><span></span>Kiến Trúc Cơ Sở Dữ Liệu Phân Tán</h2>
+                <p>Cấu trúc bảng (Schema DDL), các indexes tối ưu tìm kiếm và quan hệ thực thể cốt lõi</p>
+            </div>
+
+            <div class="grid-3">
+                <!-- Table 1: Account -->
+                <div class="db-table">
+                    <div class="db-table-header">
+                        <span>account</span>
+                        <span class="tag primary" style="font-size:0.65rem;">Static</span>
+                    </div>
+                    <div class="db-table-rows">
+                        <div class="db-row"><span class="db-col-name"><span class="pk-icon">🔑</span>account_id</span><span class="db-col-type">VARCHAR(50)</span></div>
+                        <div class="db-row"><span class="db-col-name">book_id</span><span class="db-col-type">VARCHAR(50)</span></div>
+                        <div class="db-row"><span class="db-col-name">customer_name</span><span class="db-col-type">VARCHAR(100)</span></div>
+                        <div class="db-row"><span class="db-col-name">norms_factor</span><span class="db-col-type">INT</span></div>
+                        <div class="db-row"><span class="db-col-name">status</span><span class="db-col-type">VARCHAR(20)</span></div>
+                    </div>
+                </div>
+
+                <!-- Table 2: Meter Point -->
+                <div class="db-table">
+                    <div class="db-table-header">
+                        <span>meter_point</span>
+                        <span class="tag primary" style="font-size:0.65rem;">Static</span>
+                    </div>
+                    <div class="db-table-rows">
+                        <div class="db-row"><span class="db-col-name"><span class="pk-icon">🔑</span>meter_point_id</span><span class="db-col-type">VARCHAR(50)</span></div>
+                        <div class="db-row"><span class="db-col-name"><span class="fk-icon">🔗</span>account_id</span><span class="db-col-type">VARCHAR(50)</span></div>
+                        <div class="db-row"><span class="db-col-name"><span class="fk-icon">🔗</span>tariff_code</span><span class="db-col-type">VARCHAR(50)</span></div>
+                        <div class="db-row"><span class="db-col-name">status</span><span class="db-col-type">VARCHAR(20)</span></div>
+                    </div>
+                </div>
+
+                <!-- Table 3: Meter Relation -->
+                <div class="db-table">
+                    <div class="db-table-header">
+                        <span>meter_relation</span>
+                        <span class="tag secondary" style="font-size:0.65rem;">Topology</span>
+                    </div>
+                    <div class="db-table-rows">
+                        <div class="db-row"><span class="db-col-name"><span class="pk-icon">🔑</span>relation_id</span><span class="db-col-type">BIGINT</span></div>
+                        <div class="db-row"><span class="db-col-name"><span class="fk-icon">🔗</span>parent_id</span><span class="db-col-type">VARCHAR(50)</span></div>
+                        <div class="db-row"><span class="db-col-name"><span class="fk-icon">🔗</span>child_id</span><span class="db-col-type">VARCHAR(50)</span></div>
+                        <div class="db-row"><span class="db-col-name">relation_type</span><span class="db-col-type">VARCHAR(20)</span></div>
+                    </div>
+                </div>
+
+                <!-- Table 4: Meter Usage -->
+                <div class="db-table">
+                    <div class="db-table-header">
+                        <span>meter_usage</span>
+                        <span class="tag warning" style="font-size:0.65rem;">Partition</span>
+                    </div>
+                    <div class="db-table-rows">
+                        <div class="db-row"><span class="db-col-name"><span class="pk-icon">🔑</span>usage_id</span><span class="db-col-type">BIGINT</span></div>
+                        <div class="db-row"><span class="db-col-name"><span class="pk-icon">🔑</span>billing_cycle_month</span><span class="db-col-type">VARCHAR(20)</span></div>
+                        <div class="db-row"><span class="db-col-name">account_id</span><span class="db-col-type">VARCHAR(50)</span></div>
+                        <div class="db-row"><span class="db-col-name">meter_point_id</span><span class="db-col-type">VARCHAR(50)</span></div>
+                        <div class="db-row"><span class="db-col-name">start_index</span><span class="db-col-type">DECIMAL(12,2)</span></div>
+                        <div class="db-row"><span class="db-col-name">end_index</span><span class="db-col-type">DECIMAL(12,2)</span></div>
+                        <div class="db-row"><span class="db-col-name">consumption</span><span class="db-col-type">DECIMAL (Generated)</span></div>
+                        <div class="db-row"><span class="db-col-name">status</span><span class="db-col-type">VARCHAR(20)</span></div>
+                    </div>
+                </div>
+
+                <!-- Table 5: Snapshot -->
+                <div class="db-table">
+                    <div class="db-table-header">
+                        <span>billing_account_snapshot</span>
+                        <span class="tag accent" style="font-size:0.65rem;">Frozen</span>
+                    </div>
+                    <div class="db-table-rows">
+                        <div class="db-row"><span class="db-col-name"><span class="pk-icon">🔑</span>snapshot_id</span><span class="db-col-type">VARCHAR(100)</span></div>
+                        <div class="db-row"><span class="db-col-name">account_id</span><span class="db-col-type">VARCHAR(50)</span></div>
+                        <div class="db-row"><span class="db-col-name">book_id</span><span class="db-col-type">VARCHAR(50)</span></div>
+                        <div class="db-row"><span class="db-col-name">billing_cycle_month</span><span class="db-col-type">VARCHAR(20)</span></div>
+                        <div class="db-row"><span class="db-col-name">calculation_version</span><span class="db-col-type">INT</span></div>
+                        <div class="db-row"><span class="db-col-name">config_data</span><span class="db-col-type">JSONB (Frozen Topology)</span></div>
+                    </div>
+                </div>
+
+                <!-- Table 6: Invoice -->
+                <div class="db-table">
+                    <div class="db-table-header">
+                        <span>bill_invoice</span>
+                        <span class="tag warning" style="font-size:0.65rem;">Partition</span>
+                    </div>
+                    <div class="db-table-rows">
+                        <div class="db-row"><span class="db-col-name"><span class="pk-icon">🔑</span>invoice_id</span><span class="db-col-type">VARCHAR(100)</span></div>
+                        <div class="db-row"><span class="db-col-name"><span class="pk-icon">🔑</span>billing_cycle_month</span><span class="db-col-type">VARCHAR(20)</span></div>
+                        <div class="db-row"><span class="db-col-name">account_id</span><span class="db-col-type">VARCHAR(50)</span></div>
+                        <div class="db-row"><span class="db-col-name">total_amount_before_tax</span><span class="db-col-type">DECIMAL(12,2)</span></div>
+                        <div class="db-row"><span class="db-col-name">tax_amount</span><span class="db-col-type">DECIMAL(12,2)</span></div>
+                        <div class="db-row"><span class="db-col-name">total_amount_after_tax</span><span class="db-col-type">DECIMAL(12,2)</span></div>
+                        <div class="db-row"><span class="db-col-name">idempotency_key</span><span class="db-col-type">VARCHAR(100) (Unique)</span></div>
+                        <div class="db-row"><span class="db-col-name">billing_manifest</span><span class="db-col-type">JSONB (Audit trail)</span></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Outbox and logs -->
+            <div class="grid-2" style="margin-top: 1.5rem;">
+                <div class="db-table">
+                    <div class="db-table-header">
+                        <span>outbox_event</span>
+                        <span class="tag secondary" style="font-size:0.65rem;">Integration</span>
+                    </div>
+                    <div class="db-table-rows">
+                        <div class="db-row"><span class="db-col-name"><span class="pk-icon">🔑</span>event_id</span><span class="db-col-type">UUID</span></div>
+                        <div class="db-row"><span class="db-col-name">aggregate_type</span><span class="db-col-type">VARCHAR(50) ('INVOICE')</span></div>
+                        <div class="db-row"><span class="db-col-name">aggregate_id</span><span class="db-col-type">VARCHAR(100) (Invoice ID)</span></div>
+                        <div class="db-row"><span class="db-col-name">event_type</span><span class="db-col-type">VARCHAR(50) ('INVOICE_CREATED')</span></div>
+                        <div class="db-row"><span class="db-col-name">payload</span><span class="db-col-type">JSONB (Event Data)</span></div>
+                    </div>
+                </div>
+
+                <div class="db-table">
+                    <div class="db-table-header">
+                        <span>billing_calculation_log</span>
+                        <span class="tag success" style="font-size:0.65rem;">Audit Logs</span>
+                    </div>
+                    <div class="db-table-rows">
+                        <div class="db-row"><span class="db-col-name"><span class="pk-icon">🔑</span>log_id</span><span class="db-col-type">UUID</span></div>
+                        <div class="db-row"><span class="db-col-name">book_id</span><span class="db-col-type">VARCHAR(50)</span></div>
+                        <div class="db-row"><span class="db-col-name">account_id</span><span class="db-col-type">VARCHAR(50)</span></div>
+                        <div class="db-row"><span class="db-col-name">status</span><span class="db-col-type">VARCHAR(20) ('SUCCESS', 'FAILED')</span></div>
+                        <div class="db-row"><span class="db-col-name">input_data</span><span class="db-col-type">JSONB</span></div>
+                        <div class="db-row"><span class="db-col-name">output_data</span><span class="db-col-type">JSONB (Manifest)</span></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ================== TAB 4: MONITORING DASHBOARD ================== -->
+        <section id="tab-dashboard" class="tab-content">
+            <div class="section-header">
+                <h2><span></span>Trạng Thái Vận Hành Hệ Thống (Realtime Monitor Mockup)</h2>
+                <p>Giám sát hiệu năng xử lý luồng ảo Virtual Threads và áp lực backpressure từ Kafka</p>
+            </div>
+
+            <div class="grid-4">
+                <div class="metric-card">
+                    <span class="metric-title">Số luồng ảo đang hoạt động</span>
+                    <span class="metric-value color-primary" id="mon-threads">24,510</span>
+                    <span class="metric-footer">▲ 12.3% so với phút trước</span>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-title">Tốc độ chốt cước</span>
+                    <span class="metric-value color-accent" id="mon-tps">12,480/s</span>
+                    <span class="metric-footer">▲ Cao điểm chạy Batch</span>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-title">Tỷ lệ hit Redis Snapshot</span>
+                    <span class="metric-value color-success" id="mon-redis">99.85%</span>
+                    <span class="metric-footer">Tải DB giảm 95%</span>
+                </div>
+                <div class="metric-card">
+                    <span class="metric-title">Kafka Lag Metric</span>
+                    <span class="metric-value" id="mon-lag" style="color:var(--warning);">420</span>
+                    <span class="metric-footer down" style="color:var(--warning);">Ổn định nhờ Auto-scale KEDA</span>
+                </div>
+            </div>
+
+            <!-- Log Stream and system metrics simulation -->
+            <div class="card" style="margin-top: 2rem;">
+                <h3 style="font-size: 1.1rem; font-weight:600; margin-bottom:1rem; display:flex; align-items:center; gap:0.5rem;">
+                    <span style="display:inline-block; width:10px; height:10px; border-radius:50%; background:var(--accent); animation: pulse 1s infinite;"></span>
+                    Dòng vết log hệ thống (Audit Tracer Logs)
+                </h3>
+                <div class="code-block" id="log-console" style="height: 250px; overflow-y: auto; color:#a7f3d0; background:#020617; font-size:0.8rem; line-height: 1.6;">
+                    <!-- Real-time logs simulation will print here -->
+                </div>
+            </div>
+        </section>
+
+    </div>
+
+    <!-- SCRIPT LOGIC -->
+    <script>
+        // Tab switching logic
+        function switchTab(tabId) {
+            document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            
+            // Activate button
+            const activeBtn = Array.from(document.querySelectorAll('.nav-btn')).find(btn => btn.innerText.toLowerCase().includes(tabId === 'diagram' ? 'sơ đồ' : tabId === 'simulator' ? 'giả lập' : tabId === 'database' ? 'kiến trúc' : 'giám sát'));
+            if (activeBtn) activeBtn.classList.add('active');
+            
+            // Activate tab content
+            document.getElementById('tab-' + tabId).classList.add('active');
+
+            if (tabId === 'simulator') {
+                runSimulateCalculation();
+            }
+            if (tabId === 'dashboard') {
+                startMonitoringSimulation();
+            } else {
+                stopMonitoringSimulation();
+            }
+        }
+
+        // Active workflow details mapping
+        const workflowDetails = {
+            1: {
+                title: "Luồng 1: Tính Cước Cuốn Chiếu Tự Động (Kafka Ingest)",
+                tag: "Reactive Flow",
+                desc: "Hệ thống tiếp nhận chỉ số đo xa tự động từ CMIS thông qua Kafka 'meter-readings-input'. Mediation Service lắng nghe qua 'CmisIngestionListener', kiểm duyệt chỉ số và lưu vào DB (bảng meter_usage) để lưu vết lịch sử. Đồng thời, hệ thống kiểm tra tính đầy đủ (topology readiness check). Khi đã nhận đủ chỉ số cho toàn bộ các điểm đo thuộc hộ dân (lấy cấu hình từ Redis Cache), Mediation Service sẽ lấy các chỉ số này đính kèm trực tiếp vào Task tin nhắn và gửi vào Kafka Topic 'billing-execution-topic' để Worker tiêu thụ bất đồng bộ mà không cần phải đọc lại DB.",
+                features: [
+                    "Đẩy chỉ số tự động từ CMIS qua Kafka Topic 'meter-readings-input'",
+                    "Kiểm duyệt dữ liệu và cập nhật bulk vào database meter_usage để làm dữ liệu lịch sử",
+                    "Đính kèm trực tiếp các chỉ số vào Task cước trên Kafka để giảm tải đọc DB PostgreSQL"
+                ],
+                lines: [
+                    { id: "line1-1", mode: "write" },
+                    { id: "line1-2", mode: "read" },
+                    { id: "line1-3", mode: "read" },
+                    { id: "line1-4", mode: "write" },
+                    { id: "line1-5", mode: "write" },
+                    { id: "line1-6", mode: "read" },
+                    { id: "line1-7", mode: "read" },
+                    { id: "line1-8", mode: "write" },
+                    { id: "line1-9", mode: "read" },
+                    { id: "line1-10", mode: "write" },
+                    { id: "line1-11", mode: "read" }
+                ],
+                code: `// Trong CmisIngestionListener.java
+@KafkaListener(
+    topics = "meter-readings-input",
+    groupId = "mediation-group",
+    containerFactory = "kafkaBatchListenerContainerFactory"
+)
+public void listenCmisReadingBatch(List<ConsumerRecord<String, CmisReadingEvent>> records) {
+    // 1. Bulk insert to DB meter_usage
+    jdbcTemplate.batchUpdate(sql, meterUsageBatch);
+    // 2. Check completeness, fetch readings, and attach them to Kafka execution task DTO
+    List<MeterReadingDto> readings = getReadingsFromMemory(accountId);
+    checkAndTriggerBillingWithReadings(accountId, month, readings);
+}`
+            },
+            2: {
+                title: "Luồng 2: Chốt Sổ Hàng Loạt (Spring Batch)",
+                tag: "Batch Orchestration",
+                desc: "CMIS gửi yêu cầu chạy tính cước hàng loạt theo Mã Sổ (Book_ID) qua Kafka topic 'cmis-batch-requests'. Batch Orchestrator chạy Spring Batch: (1) Nạp trước cấu hình Snapshot của toàn sổ lên Redis Cluster. (2) Đọc phân trang các Hộ cùng các chỉ số đo đếm tương ứng của chu kỳ. (3) Đóng gói kèm chỉ số tiêu thụ trực tiếp vào trong Task tin nhắn, đẩy đồng loạt vào Kafka Topic 'billing-execution-topic' để các Worker tính toán song song cực nhanh mà hoàn toàn không cần truy vấn đọc DB.",
+                features: [
+                    "Nhận yêu cầu chốt sổ bất đồng bộ từ CMIS qua Kafka",
+                    "Đọc gom chỉ số phân trang và đóng gói sẵn chỉ số vào Task cước",
+                    "Worker xử lý song song trên RAM tuyệt đối không phát sinh I/O Read DB"
+                ],
+                lines: [
+                    { id: "line2-trigger-1", mode: "write" },
+                    { id: "line2-trigger-2", mode: "read" },
+                    { id: "line2-1", mode: "read" },
+                    { id: "line2-2", mode: "write" },
+                    { id: "line2-3", mode: "write" },
+                    { id: "line1-6", mode: "read" },
+                    { id: "line1-7", mode: "read" },
+                    { id: "line1-8", mode: "write" },
+                    { id: "line1-9", mode: "read" },
+                    { id: "line1-10", mode: "write" },
+                    { id: "line1-11", mode: "read" }
+                ],
+                code: `// Trong Batch Orchestrator lắng nghe yêu cầu chạy Batch
+@KafkaListener(topics = "cmis-batch-requests", groupId = "batch-orch-group")
+public void listenBatchTrigger(BatchTriggerEvent event) {
+    JobParameters params = new JobParametersBuilder()
+            .addString("bookId", event.getBookId())
+            .addString("month", event.getBillingCycleMonth())
+            .addLong("time", System.currentTimeMillis())
+            .toJobParameters();
+    jobLauncher.run(billingJob, params);
+}`
+            },
+            3: {
+                title: "Luồng 3: On-Demand Fallback (Đồng Bộ REST)",
+                tag: "Sync Fallback",
+                desc: "Xảy ra khi Nhân viên vận hành vừa sửa chỉ số thủ công của khách hàng trên Exception Portal và lập tức bấm 'Xem hóa đơn' trên CMIS. Kịch bản này chuyển sang cơ chế Fallback đồng bộ tức thì: CMIS gửi REST request xem hóa đơn khẩn cấp, Mediation Service nhận thấy hóa đơn chưa tính xong sẽ kích hoạt REST API gọi trực tiếp sang Billing Worker để tính cước khẩn cấp trên RAM (<10ms), lưu hóa đơn trực tiếp vào DB và trả về kết quả hiển thị ngay cho giao diện.",
+                features: [
+                    "Bỏ qua hàng đợi Kafka để đạt thời gian phản hồi tức thời",
+                    "Giao tiếp trực tiếp đồng bộ qua REST",
+                    "Vẫn đảm bảo tính nguyên tử: ghi hóa đơn, outbox event và logs vào DB"
+                ],
+                lines: [
+                    { id: "line3-1", mode: "trigger" },
+                    { id: "line3-2", mode: "trigger" },
+                    { id: "line1-7", mode: "read" },
+                    { id: "line1-8", mode: "write" },
+                    { id: "line1-9", mode: "read" },
+                    { id: "line1-10", mode: "write" },
+                    { id: "line1-11", mode: "read" }
+                ],
+                code: `// Trong OnDemandBillingController.java (billing-worker)
+@PostMapping("/calculate-immediate")
+public ResponseEntity<CalculationResult> calculateImmediate(@RequestBody BillingTaskDto task) {
+    billingService.processBilling(task);
+    return ResponseEntity.ok(result);
+}`
+            },
+            4: {
+                title: "Luồng 4: Đồng Bộ Dữ Liệu Tĩnh (CMIS Master Data Sync)",
+                tag: "Master Data Sync",
+                desc: "Khi CMIS có thay đổi thông tin tĩnh liên quan đến tính toán cước (ví dụ: thông tin khách hàng, cấu trúc cây công tơ phụ tải netting, thay đổi định mức hộ dùng chung, cập nhật biểu giá quy định mới), CMIS sẽ tự động đẩy thông tin thay đổi qua Kafka Topic 'cmis-masterdata-sync'. Snapshot Generator lắng nghe topic này, cập nhật các bảng dữ liệu tĩnh trong database và thực thi xóa/tái khởi tạo tệp Snapshot tĩnh lưu trên Redis Cache để luôn bảo đảm dữ liệu tính toán mới nhất.",
+                features: [
+                    "Tự động đồng bộ các thay đổi hợp đồng, biểu giá từ CMIS thời gian thực",
+                    "Sử dụng hàng đợi Kafka đảm bảo không thất thoát sự kiện biến động dữ liệu",
+                    "Cơ chế tự động giải phóng/thu hồi (Eviction) Snapshot cũ trên Redis Cache"
+                ],
+                lines: [
+                    { id: "line4-1", mode: "write" },
+                    { id: "line4-2", mode: "write" },
+                    { id: "line4-3", mode: "write" }
+                ],
+                code: `// Giả lập xử lý đồng bộ dữ liệu thay đổi từ CMIS
+@KafkaListener(topics = "cmis-masterdata-sync", groupId = "sync-group")
+public void listenMasterDataSync(MasterDataSyncEvent event) {
+    // 1. Cập nhật bảng dữ liệu tĩnh (account, meter_point, meter_relation, tariff)
+    dbService.updateStaticDetails(event);
+    // 2. Thu hồi snapshot cũ trên Redis Cache
+    redisTemplate.delete("snapshot:" + event.getAccountId() + ":" + currentMonth);
+}`
+            }
+        };
+
+        // Activate workflow visual route and details panel
+        function activateWorkflow(id) {
+            // Update workflow button styling
+            document.querySelectorAll('.wf-btn').forEach(btn => btn.classList.remove('active'));
+            const activeWfBtn = document.querySelectorAll('.wf-btn')[id - 1];
+            if (activeWfBtn) activeWfBtn.classList.add('active');
+
+            const details = workflowDetails[id];
+            
+            // Set details info text
+            document.getElementById('wf-title').innerText = details.title;
+            document.getElementById('wf-tag').innerText = details.tag;
+            document.getElementById('wf-desc').innerText = details.desc;
+            
+            // Render features list
+            const featuresContainer = document.getElementById('wf-features');
+            featuresContainer.innerHTML = '';
+            details.features.forEach(f => {
+                const li = document.createElement('li');
+                li.innerText = f;
+                featuresContainer.appendChild(li);
+            });
+
+            // Set Code block
+            document.getElementById('wf-code-section').style.display = 'block';
+            document.getElementById('wf-code').innerText = details.code;
+
+            // Reset all active classes on SVG
+            document.querySelectorAll('.flow-line').forEach(line => {
+                line.classList.remove('active-write', 'active-read', 'active-trigger');
+                line.setAttribute('marker-end', 'url(#arrow)');
+            });
+            document.querySelectorAll('.node-group').forEach(node => {
+                node.classList.remove('active-node');
+            });
+
+            // Activate specific route lines
+            details.lines.forEach(lineObj => {
+                const el = document.getElementById(lineObj.id);
+                if (el) {
+                    el.classList.add('active-' + lineObj.mode);
+                    el.setAttribute('marker-end', 'url(#arrow-' + lineObj.mode + ')');
+                }
+            });
+        }
+
+
+        // Show node specifics on click
+        const nodeInfoMapping = {
+            'cmis': {
+                title: "CMIS System (Hệ thống Nguồn gốc & Hóa đơn)",
+                tag: "Source & Target",
+                desc: "CMIS (Customer Management Information System) là hệ thống thông tin quản lý khách hàng cốt lõi của EVN. CMIS đóng vai trò là hệ thống nguồn (Source System): (1) Đẩy chỉ số tiêu thụ điện năng thô của các công tơ định kỳ qua Kafka topic 'meter-readings-input'. (2) Gửi lệnh chốt cước hàng loạt qua Kafka topic 'cmis-batch-requests'. (3) Đồng bộ các biến động dữ liệu tĩnh qua Kafka topic 'cmis-masterdata-sync'. Ngoài ra, CMIS cũng là hệ thống đích tiếp nhận dữ liệu hóa đơn điện lực đã tính toán xong qua Kafka topic 'invoice-outbound' để ghi nhận công nợ và in hóa đơn giấy/điện tử.",
+                code: `// DTO thay đổi dữ liệu đồng bộ từ CMIS
+public class MasterDataSyncEvent {
+    private String accountId;
+    private int normsFactor;
+    private List<MeterPointDto> meters;
+}`
+            },
+            'kafka-readings': {
+                title: "Kafka Topic: meter-readings-input",
+                tag: "Event Topic",
+                desc: "Hàng đợi tin nhắn (Message Queue) chịu trách nhiệm tiếp nhận và lưu trữ đệm toàn bộ chỉ số đo đếm thô được truyền tải từ hệ thống CMIS gửi sang. Việc truyền nhận qua Kafka giúp hệ thống chốt cước chịu tải cực tốt, tránh mất mát dữ liệu khi lượng chỉ số đổ về đồng loạt hàng triệu bản ghi trong các ngày cao điểm ghi chỉ số.",
+                code: `// Sự kiện chỉ số điện
+public class CmisReadingEvent {
+    private String accountId;
+    private String meterPointId;
+    private String billingCycleMonth;
+    private BigDecimal startIndex;
+    private BigDecimal endIndex;
+}`
+            },
+            'mediation': {
+                title: "Mediation Service (CmisIngestionListener)",
+                tag: "Kafka Consumer",
+                desc: "Mediation Service lắng nghe chỉ số thô từ topic 'meter-readings-input', kiểm duyệt và cập nhật bulk vào bảng 'meter_usage' (Postgres) để lưu vết lịch sử. Sau đó, nó đối soát cấu hình cây công tơ (Topology) từ Redis. Nếu cây đo đếm của hộ dân đã nhận đủ chỉ số, Mediation Service lấy toàn bộ các chỉ số này đính kèm vào trong Task tính cước (BillingTaskDto) và gửi sang Kafka topic 'billing-execution-topic'. Việc này giúp loại bỏ hoàn toàn các câu lệnh SELECT đọc cơ sở dữ liệu ở phía Billing Worker.",
+                code: `// Gửi lệnh tính cước kèm theo danh sách chỉ số tiêu thụ
+public void checkAndTriggerBillingWithReadings(String accountId, String month, List<MeterReadingDto> readings) {
+    BillingTaskDto task = new BillingTaskDto(accountId, bookId, month, readings);
+    kafkaTemplate.send("billing-execution-topic", accountId, task);
+}`
+            },
+            'kafka-execution': {
+                title: "Kafka Topic: billing-execution-topic",
+                tag: "Execution Queue",
+                desc: "Topic phân phối các lệnh tính toán cước bất đồng bộ. Mỗi bản tin Task đã được đính kèm sẵn mảng chỉ số đo đếm đầy đủ của hộ dân (Readings List) thay vì chỉ chứa ID, giúp Worker xử lý khép kín hoàn toàn trên bộ nhớ RAM.",
+                code: `// Bản tin chứa sẵn dữ liệu chỉ số đo đếm
+{
+  "accountId": "ACC-EVN-00231",
+  "billingCycleMonth": "2026_06",
+  "readings": [
+     {"meterPointId": "MTR-01", "endIndex": 1450.0, "startIndex": 1000.0},
+     {"meterPointId": "MTR-02", "endIndex": 300.0, "startIndex": 200.0}
+  ]
+}`
+            },
+            'worker': {
+                title: "Billing Worker Node (Loom Computational)",
+                tag: "Stateless Worker",
+                desc: "Billing Worker là phân hệ chịu trách nhiệm tính toán cước cốt lõi sử dụng Java 21 Virtual Threads (Loom). Worker tiêu thụ Task từ 'billing-execution-topic', nhận trực tiếp các chỉ số đính kèm sẵn trong tin nhắn mà không cần truy vấn SELECT vào PostgreSQL. Sau đó, nó đọc Snapshot cấu hình từ Redis Cache và thực hiện tính toán cước bậc thang / cây netting hoàn toàn trên RAM (<10ms). Cuối cùng, nó chỉ thực hiện một tác vụ Ghi (Write) duy nhất: lưu hóa đơn mới (bill_invoice) và outbox event vào Postgres trong cùng transaction.",
+                code: `// Worker nhận Task có sẵn chỉ số để tính toán
+public void processBilling(BillingTaskDto task) {
+    // 1. Chỉ số có sẵn trong task.getReadings(), không cần SELECT DB!
+    // 2. Lấy cấu hình topology từ Redis
+    BillingConfigSnapshot config = getSnapshotFromRedis(task.getAccountId());
+    // 3. Tính cước & Ghi (Write) hóa đơn mới vào PostgreSQL
+    saveInvoiceAndOutbox(invoice, outboxEvent);
+}`
+            },
+            'redis': {
+                title: "Redis Cluster (Snapshot Cache)",
+                tag: "Cache Layer",
+                desc: "Redis Cluster đóng vai trò làm bộ nhớ đệm (Snapshot Cache) lưu trữ thông tin cấu hình tĩnh đã đóng băng của từng hộ dân (gồm biểu giá cước, sơ đồ cây công tơ, hệ số định mức hộ dùng chung). Khi tính toán, thay vì Worker phải JOIN nhiều bảng phức tạp trong Database để lấy cấu hình, nó sẽ đọc trực tiếp từ Redis trên RAM với thời gian đáp ứng cực nhanh (<1ms). Dữ liệu Snapshot này được tạo ra từ đầu kỳ chốt cước hoặc tự động giải phóng (evict) và cập nhật lại khi có sự kiện đồng bộ từ CMIS.",
+                code: `// Cache-aside pattern
+String cacheKey = "snapshot:" + accountId + ":" + month;
+BillingConfigSnapshot config = (BillingConfigSnapshot) redisTemplate.opsForValue().get(cacheKey);
+if (config == null) {
+    config = snapshotRepository.findByAccountId(...).getConfigData();
+    redisTemplate.opsForValue().set(cacheKey, config, 24, TimeUnit.HOURS);
+}`
+            },
+            'postgres': {
+                title: "Postgres / TiDB (Relational Storage)",
+                tag: "Database Storage",
+                desc: "Cơ sở dữ liệu lưu giữ trạng thái giao dịch tài chính ACID. Bảng meter_usage và bill_invoice được phân vùng vật lý theo tháng (Range Partitioning by Month) để tăng hiệu năng ghi lô và xóa dữ liệu lịch sử nhanh chóng.",
+                code: `-- DDL phân vùng theo tháng
+CREATE TABLE bill_invoice (
+    invoice_id VARCHAR(50) NOT NULL,
+    billing_cycle_month VARCHAR(10) NOT NULL,
+    total_amount_after_tax NUMERIC(15,2) NOT NULL,
+    PRIMARY KEY (invoice_id, billing_cycle_month)
+) PARTITION BY RANGE (billing_cycle_month);`
+            },
+            'kafka-sync': {
+                title: "Kafka Topic: cmis-masterdata-sync",
+                tag: "Master Data Topic",
+                desc: "Topic chịu trách nhiệm đồng bộ dữ liệu tĩnh khi CMIS phát sinh thay đổi hợp đồng, biểu giá hoặc sơ đồ cây công tơ. Đảm bảo hệ thống tính cước mới luôn cập nhật thông tin tính toán mới nhất.",
+                code: `// Tần suất đồng bộ qua Kafka
+Topic: cmis-masterdata-sync
+Payload: JSON thay đổi chi tiết quan hệ công tơ / biểu giá của Account`
+            },
+            'kafka-outbound': {
+                title: "Kafka Topic: invoice-outbound",
+                tag: "Outbound Topic",
+                desc: "Topic tiếp nhận các sự kiện hóa đơn chốt cước thành công từ CDC Debezium chuyển tiếp. CMIS đăng ký lắng nghe topic này để cập nhật công nợ tức thời cho khách hàng.",
+                code: `// Message sự kiện hóa đơn đẩy về CMIS
+{
+  "eventId": "EVT-992384-A",
+  "eventType": "INVOICE_CREATED",
+  "accountId": "ACC-EVN-00231",
+  "amount": 767500.00,
+  "billingCycle": "2026_06"
+}`
+            },
+            'cdc': {
+                title: "Debezium Outbox CDC Connector",
+                tag: "CDC Connector",
+                desc: "Debezium CDC (Change Data Capture) là cấu phần quét log giao dịch (WAL) của PostgreSQL. Khi Worker ghi hóa đơn thành công và chèn sự kiện mới vào bảng 'outbox_event' trong cùng transaction, Debezium CDC sẽ phát hiện sự thay đổi này theo thời gian thực và đẩy sự kiện 'INVOICE_CREATED' vào Kafka topic 'invoice-outbound'.",
+                code: `// Sự kiện Outbox ghi cùng transaction của Invoice
+OutboxEvent event = new OutboxEvent();
+event.setAggregateType("INVOICE");
+event.setAggregateId(invoiceId);
+event.setEventType("INVOICE_CREATED");
+event.setPayload(objectMapper.writeValueAsString(outboxPayload));`
+            },
+            'downstream': {
+                title: "CMIS System (Đích nhận Hóa đơn)",
+                tag: "Integration Target",
+                desc: "Nhận các sự kiện hóa đơn điện lực đã tính toán xong từ outbox_event thông qua topic 'invoice-outbound' để: (1) Đồng bộ cập nhật công nợ và trạng thái thanh toán ngược về CMIS. (2) Tự động kích hoạt luồng xuất Hóa đơn điện tử VAT. (3) Gửi tin nhắn SMS/Zalo thông báo chỉ số và tiền điện cho khách hàng tiêu dùng.",
+                code: `// Sự kiện đẩy về CMIS nhận hóa đơn
+{
+  "event_type": "INVOICE_CREATED",
+  "payload": {
+     "invoiceId": "INV-KH001-2026_06-v1",
+     "amountAfterTax": 767500.00,
+     "timestamp": "2026-06-29T23:15:00Z"
+  }
+}`
+            },
+            'orchestrator': {
+                title: "Batch Orchestrator (Spring Batch Master)",
+                tag: "Orchestration Layer",
+                desc: "Batch Orchestrator (Spring Batch) là bộ điều phối chạy tính cước hàng loạt theo chu kỳ cuối tháng (ví dụ chốt sổ cho hàng triệu khách hàng theo Mã Sổ). Nó lắng nghe các yêu cầu chạy chốt sổ từ Kafka topic 'cmis-batch-requests'. Khi nhận được yêu cầu, nó khởi chạy Spring Batch Job: (1) Gọi Snapshot Generator đóng băng cấu hình và nạp trước (warm-up) lên Redis Cache. (2) Đọc phân trang danh sách khách hàng từ Database. (3) Đẩy đồng loạt các Task chốt cước vào topic 'billing-execution-topic' để các Worker Node xử lý song song.",
+                code: `// Batch Consumer trong Batch Orchestrator
+@KafkaListener(topics = "cmis-batch-requests", groupId = "batch-orch-group")
+public void listenBatchTrigger(BatchTriggerEvent event) {
+    JobParameters params = new JobParametersBuilder()
+        .addString("bookId", event.getBookId())
+        .addString("month", event.getBillingCycleMonth())
+        .toJobParameters();
+    jobLauncher.run(billingJob, params);
+}`
+            },
+            'kafka-batch': {
+                title: "Kafka Topic: cmis-batch-requests",
+                tag: "Event Topic",
+                desc: "Hàng đợi nhận yêu cầu chạy tính cước hàng loạt từ CMIS. Thay vì CMIS gọi trực tiếp REST API của Batch Orchestrator, nó gửi tin nhắn bất đồng bộ qua topic này để tránh bị nghẽn thời gian chờ (timeout) khi kích hoạt chốt sổ cho hàng triệu khách hàng cùng lúc.",
+                code: `// Cấu trúc message kích hoạt Batch
+{
+  "bookId": "SO_01",
+  "billingCycleMonth": "2026_06",
+  "calculationVersion": 1
+}`
+            }
+        };
+
+        function showNodeDetails(nodeId) {
+            const data = nodeInfoMapping[nodeId];
+            
+            // Set styles to active node
+            document.querySelectorAll('.node-group').forEach(node => {
+                node.classList.remove('active-node');
+            });
+            const targetNode = document.getElementById('node-' + nodeId);
+            if (targetNode) {
+                targetNode.classList.add('active-node');
+            }
+
+            document.getElementById('node-title').innerText = data.title;
+            document.getElementById('node-tag').innerText = data.tag;
+            document.getElementById('node-desc').innerText = data.desc;
+
+            // Set Code block
+            document.getElementById('node-code-section').style.display = 'block';
+            document.getElementById('node-code').innerText = data.code;
+        }
+
+        // ================== SIMULATION RATING ALGORITHM ==================
+        const TARIFF_SHBT_2026 = [
+            { step: 1, min_kwh: 0, max_kwh: 50, price: 1806 },
+            { step: 2, min_kwh: 50, max_kwh: 100, price: 1866 },
+            { step: 3, min_kwh: 100, max_kwh: 200, price: 2167 },
+            { step: 4, min_kwh: 200, max_kwh: 300, price: 2729 },
+            { step: 5, min_kwh: 300, max_kwh: 400, price: 3050 },
+            { step: 6, min_kwh: 400, max_kwh: Infinity, price: 3157 }
+        ];
+
+        function runSimulateCalculation() {
+            const mainStart = parseFloat(document.getElementById('main-start').value) || 0;
+            const mainEnd = parseFloat(document.getElementById('main-end').value) || 0;
+            const subStart = parseFloat(document.getElementById('sub-start').value) || 0;
+            const subEnd = parseFloat(document.getElementById('sub-end').value) || 0;
+            const normsFactor = parseInt(document.getElementById('norms').value) || 1;
+            const prorationDays = parseInt(document.getElementById('proration').value) || 30;
+
+            const mainCons = mainEnd - mainStart;
+            const subCons = subEnd - subStart;
+            
+            // Netting calculation: Total - Sub
+            const netCons = Math.max(0, mainCons - subCons);
+
+            // Display consumption breakdown
+            document.getElementById('res-main-cons').innerText = mainCons.toFixed(2) + " kWh";
+            document.getElementById('res-sub-cons').innerText = "- " + subCons.toFixed(2) + " kWh";
+            document.getElementById('res-net-cons').innerText = netCons.toFixed(2) + " kWh";
+
+            // Scale factor: norms * (prorationDays / 30)
+            const proRataFactor = prorationDays / 30;
+            const scale = normsFactor * proRataFactor;
+
+            document.getElementById('res-scaled-tier').innerText = "0 - " + (50 * scale).toFixed(2) + " kWh";
+
+            // Stepping calculation
+            let remainingKwh = netCons;
+            let totalAmountBeforeTax = 0;
+            const stepResults = [];
+
+            for (const block of TARIFF_SHBT_2026) {
+                if (remainingKwh <= 0) break;
+
+                const blockMin = block.min_kwh * scale;
+                const blockMax = block.max_kwh === Infinity ? Infinity : block.max_kwh * scale;
+                const blockWidth = blockMax === Infinity ? Infinity : (blockMax - blockMin);
+
+                let kwhInThisStep;
+                if (blockWidth === Infinity || remainingKwh < blockWidth) {
+                    kwhInThisStep = remainingKwh;
+                } else {
+                    kwhInThisStep = blockWidth;
+                }
+
+                const amount = kwhInThisStep * block.price;
+                totalAmountBeforeTax += amount;
+
+                stepResults.push({
+                    step: block.step,
+                    kwh: kwhInThisStep,
+                    price: block.price,
+                    amount: amount
+                });
+
+                remainingKwh -= kwhInThisStep;
+            }
+
+            const taxAmount = totalAmountBeforeTax * 0.10; // VAT 10%
+            const totalAfterTax = totalAmountBeforeTax + taxAmount;
+
+            // Render numbers
+            document.getElementById('res-before-tax').innerText = totalAmountBeforeTax.toLocaleString('vi-VN') + " đ";
+            document.getElementById('res-tax').innerText = taxAmount.toLocaleString('vi-VN') + " đ";
+            document.getElementById('res-total').innerText = totalAfterTax.toLocaleString('vi-VN') + " đ";
+
+            // Render chart bars
+            const chartContainer = document.getElementById('res-chart');
+            chartContainer.innerHTML = '';
+
+            stepResults.forEach(res => {
+                const maxStepWidth = 100 * scale; // For visualization scaling
+                const percent = Math.min(100, (res.kwh / (50 * scale)) * 100);
+
+                const barRow = document.createElement('div');
+                barRow.className = 'chart-bar-container';
+                
+                barRow.innerHTML = `
+                    <span class="chart-label">Bậc ${res.step} (${res.price}đ)</span>
+                    <div class="chart-bar-outer">
+                        <div class="chart-bar-inner" style="width: ${percent}%"></div>
+                    </div>
+                    <span class="chart-val">${res.kwh.toFixed(1)} kWh</span>
+                `;
+                chartContainer.appendChild(barRow);
+            });
+        }
+
+        // ================== SYSTEM METRICS & LOG SIMULATOR ==================
+        let monitoringInterval;
+        const mockLogTemplates = [
+            "[AUDIT-TRACER] [Account: ACC-EVN-{{accId}}] Step 1: Kafka reading event consumed from topic 'meter-readings-input'.",
+            "[AUDIT-TRACER] [Account: ACC-EVN-{{accId}}] Step 2: Saved reading batch to DB (meter_usage) with status 'VALIDATED'.",
+            "[AUDIT-TRACER] [Account: ACC-EVN-{{accId}}] Step 3: Topology check passed. Pushing task to topic 'billing-execution-topic'.",
+            "[AUDIT-TRACER] [Account: ACC-EVN-{{accId}}] Step 4: Worker consumed task. Fetching snapshot config from Redis Cache.",
+            "[AUDIT-TRACER] [Account: ACC-EVN-{{accId}}] Step 5: Billing engine calculations finished. Total Net Consumption: {{netCons}} kWh.",
+            "[AUDIT-TRACER] [Account: ACC-EVN-{{accId}}] Step 6: Atomic save to DB: bill_invoice & outbox_event committed successfully.",
+            "[MASTER-SYNC] Consumer received account changes for ACC-EVN-{{accId}} from topic 'cmis-masterdata-sync'. Invalidating snapshot cache on Redis.",
+            "[BATCH-JOB] Book run progress updated. Book: SO_01, Processed: {{processed}}/12,000, Success: {{success}}, Failed: 0."
+        ];
+
+        function startMonitoringSimulation() {
+            if (monitoringInterval) clearInterval(monitoringInterval);
+            
+            const consoleEl = document.getElementById('log-console');
+            consoleEl.innerHTML = '<div style="color:var(--accent);">[SYSTEM] Realtime Monitor activated. Waiting for system trace events...</div>';
+
+            let threadsVal = 24510;
+            let tpsVal = 12480;
+            let lagVal = 420;
+            let processedCount = 5400;
+
+            monitoringInterval = setInterval(() => {
+                // Randomize monitoring values slightly
+                threadsVal += Math.floor(Math.random() * 200) - 100;
+                tpsVal = 11000 + Math.floor(Math.random() * 2500);
+                lagVal = Math.max(0, lagVal + Math.floor(Math.random() * 50) - 25);
+                processedCount += Math.floor(tpsVal * 0.1);
+                if (processedCount > 12000) processedCount = 500;
+
+                // Update text
+                document.getElementById('mon-threads').innerText = threadsVal.toLocaleString();
+                document.getElementById('mon-tps').innerText = tpsVal.toLocaleString() + "/s";
+                document.getElementById('mon-lag').innerText = lagVal.toLocaleString();
+
+                // Generate random trace log
+                const template = mockLogTemplates[Math.floor(Math.random() * mockLogTemplates.length)];
+                const randomAccId = 100000 + Math.floor(Math.random() * 900000);
+                const randomKwh = 100 + Math.floor(Math.random() * 600);
+                
+                let logText = template
+                    .replace(/{{accId}}/g, randomAccId)
+                    .replace(/{{netCons}}/g, randomKwh)
+                    .replace(/{{price}}/g, (randomKwh * 2100).toLocaleString())
+                    .replace(/{{processed}}/g, processedCount)
+                    .replace(/{{success}}/g, processedCount);
+
+                const timeStamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
+                const logLine = document.createElement('div');
+                logLine.style.marginBottom = "0.3rem";
+                
+                // Colorize logs
+                if (logText.includes("Step 6")) {
+                    logLine.style.color = "var(--success)";
+                } else if (logText.includes("Step 5") || logText.includes("Step 3")) {
+                    logLine.style.color = "var(--text-main)";
+                } else if (logText.includes("MASTER-SYNC")) {
+                    logLine.style.color = "var(--secondary)";
+                } else if (logText.includes("BATCH-JOB")) {
+                    logLine.style.color = "var(--accent)";
+                } else {
+                    logLine.style.color = "var(--text-muted)";
+                }
+                
+                logLine.innerText = `[${timeStamp}] ${logText}`;
+                consoleEl.appendChild(logLine);
+                
+                // Scroll to bottom
+                consoleEl.scrollTop = consoleEl.scrollHeight;
+                
+                // Keep only top 100 logs to prevent overflow
+                if (consoleEl.children.length > 100) {
+                    consoleEl.removeChild(consoleEl.firstChild);
+                }
+
+            }, 800);
+        }
+
+        function stopMonitoringSimulation() {
+            if (monitoringInterval) {
+                clearInterval(monitoringInterval);
+                monitoringInterval = null;
+            }
+        }
+
+        // Initialize first workflow on load
+        window.addEventListener('load', () => {
+            activateWorkflow(1);
+        });
+    </script>
+</body>
+</html>

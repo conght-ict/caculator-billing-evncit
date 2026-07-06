@@ -1,11 +1,14 @@
 package com.evn.billing.worker.dto;
 
+import java.util.List;
+
 public class BillingTaskDto {
     private String accountId;
     private String bookId;
     private String billingCycleMonth;
     private int calculationVersion;
     private String traceId;
+    private List<MeterReadingDto> readings;
 
     public BillingTaskDto() {
     }
@@ -16,6 +19,15 @@ public class BillingTaskDto {
         this.billingCycleMonth = billingCycleMonth;
         this.calculationVersion = calculationVersion;
         this.traceId = traceId;
+    }
+
+    public BillingTaskDto(String accountId, String bookId, String billingCycleMonth, int calculationVersion, String traceId, List<MeterReadingDto> readings) {
+        this.accountId = accountId;
+        this.bookId = bookId;
+        this.billingCycleMonth = billingCycleMonth;
+        this.calculationVersion = calculationVersion;
+        this.traceId = traceId;
+        this.readings = readings;
     }
 
     public String getAccountId() {
@@ -56,5 +68,13 @@ public class BillingTaskDto {
 
     public void setTraceId(String traceId) {
         this.traceId = traceId;
+    }
+
+    public List<MeterReadingDto> getReadings() {
+        return readings;
+    }
+
+    public void setReadings(List<MeterReadingDto> readings) {
+        this.readings = readings;
     }
 }

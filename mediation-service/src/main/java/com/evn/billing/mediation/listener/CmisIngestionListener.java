@@ -7,6 +7,8 @@ import com.evn.billing.common.dto.BillingConfigSnapshot;
 import com.evn.billing.common.dto.MeterPointNode;
 import com.evn.billing.mediation.dto.BillingTaskDto;
 import com.evn.billing.mediation.dto.CmisReadingEvent;
+import com.evn.billing.mediation.dto.MeterReadingDto;
+import java.util.stream.Collectors;
 import com.evn.billing.mediation.repository.BillingAccountSnapshotRepository;
 import com.evn.billing.mediation.repository.MeterUsageRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -203,6 +205,19 @@ public class CmisIngestionListener {
             task.setBillingCycleMonth(month);
             task.setCalculationVersion(1);
             task.setTraceId(UUID.randomUUID().toString().replace("-", ""));
+            
+            List<MeterUsage> validatedUsages = meterUsageRepository.findByAccountIdAndBillingCycleMonthAndStatus(accountId, month, "VALIDATED");
+            List<MeterReadingDto> readings = validatedUsages.stream()
+                .map(u -> new MeterReadingDto(
+                    u.getMeterPointId(),
+                    u.getFromDate(),
+                    u.getToDate(),
+                    u.getStartIndex(),
+                    u.getEndIndex(),
+                    u.getConsumption()
+                ))
+                .collect(Collectors.toList());
+            task.setReadings(readings);
 
             long t2Send = System.currentTimeMillis();
             ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("billing-execution-topic", bookId, task);

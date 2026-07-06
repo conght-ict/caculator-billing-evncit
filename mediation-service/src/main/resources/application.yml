@@ -16,8 +16,8 @@ spring:
     driver-class-name: org.postgresql.Driver
     hikari:
       pool-name: MediationHikariCP
-      maximum-pool-size: 20
-      minimum-idle: 5
+      maximum-pool-size: 50
+      minimum-idle: 10
       idle-timeout: 30000
       max-lifetime: 1800000
       connection-timeout: 20000
@@ -43,6 +43,7 @@ spring:
       group-id: mediation-group
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      max-poll-records: 1000
       properties:
         spring.json.trusted.packages: "*"
         spring.json.value.default.type: com.evn.billing.mediation.dto.CmisReadingEvent

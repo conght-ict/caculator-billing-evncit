@@ -18,4 +18,6 @@ public interface MeterUsageRepository extends JpaRepository<MeterUsage, MeterUsa
            "(SELECT a.accountId FROM Account a WHERE a.bookId = :bookId AND a.status = 'ACTIVE') " +
            "AND m.billingCycleMonth = :month AND m.status = 'PENDING_MANUAL'")
     long countPendingReadingsForBook(@Param("bookId") String bookId, @Param("month") String month);
+
+    java.util.List<MeterUsage> findByAccountIdAndBillingCycleMonthAndStatus(String accountId, String billingCycleMonth, String status);
 }

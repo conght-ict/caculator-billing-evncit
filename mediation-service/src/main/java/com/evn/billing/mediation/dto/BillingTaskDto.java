@@ -3,6 +3,7 @@ package com.evn.billing.mediation.dto;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import java.util.List;
 
 @Data
 @NoArgsConstructor
@@ -13,4 +14,5 @@ public class BillingTaskDto {
     private String billingCycleMonth;
     private int calculationVersion;
     private String traceId;
+    private List<MeterReadingDto> readings;
 }

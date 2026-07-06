@@ -12,8 +12,8 @@ spring:
     driver-class-name: org.postgresql.Driver
     hikari:
       pool-name: WorkerHikariCP
-      maximum-pool-size: 50
-      minimum-idle: 10
+      maximum-pool-size: 100
+      minimum-idle: 20
       idle-timeout: 30000
       max-lifetime: 1800000
       connection-timeout: 20000
@@ -42,6 +42,7 @@ spring:
       group-id: billing-worker-group
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      max-poll-records: 1000
       properties:
         # Static Membership mapping based on host name
         group.instance.id: worker-pod-${HOSTNAME:local-worker}
@@ -51,6 +52,8 @@ spring:
         spring.json.trusted.packages: "*"
         spring.json.value.default.type: com.evn.billing.worker.dto.BillingTaskDto
         spring.json.use.type.headers: false
+        fetch.min.bytes: 1048576
+        fetch.max.wait.ms: 500
       auto-offset-reset: earliest
       enable-auto-commit: false
     listener:

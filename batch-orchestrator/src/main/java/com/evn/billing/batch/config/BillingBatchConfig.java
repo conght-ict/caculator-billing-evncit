@@ -33,6 +33,9 @@ public class BillingBatchConfig {
     @Autowired
     private KafkaTemplate<String, BillingTaskDto> kafkaTemplate;
 
+    @Autowired
+    private com.evn.billing.batch.repository.MeterUsageRepository meterUsageRepository;
+
     /**
      * Reads active Accounts belonging to a specific Book_ID page-by-page.
      */
@@ -60,12 +63,28 @@ public class BillingBatchConfig {
         return account -> {
             String traceId = UUID.randomUUID().toString().replace("-", "");
             int effectiveVersion = version != null ? version.intValue() : 1;
+            
+            java.util.List<com.evn.billing.common.domain.MeterUsage> validatedUsages = meterUsageRepository
+                    .findByAccountIdAndBillingCycleMonthAndStatus(account.getAccountId(), month, "VALIDATED");
+            
+            java.util.List<com.evn.billing.batch.dto.MeterReadingDto> readings = validatedUsages.stream()
+                    .map(u -> new com.evn.billing.batch.dto.MeterReadingDto(
+                            u.getMeterPointId(),
+                            u.getFromDate(),
+                            u.getToDate(),
+                            u.getStartIndex(),
+                            u.getEndIndex(),
+                            u.getConsumption()
+                    ))
+                    .collect(java.util.stream.Collectors.toList());
+                    
             return new BillingTaskDto(
                     account.getAccountId(),
                     account.getBookId(),
                     month,
                     effectiveVersion,
-                    traceId
+                    traceId,
+                    readings
             );
         };
     }
