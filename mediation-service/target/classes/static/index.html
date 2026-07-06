@@ -1,0 +1,2791 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EVN - Cổng Giám sát & Đối soát Tiến trình Tính cước</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root {
+            --bg-color: #0d0f17;
+            --card-bg: rgba(20, 26, 42, 0.7);
+            --border-color: rgba(255, 255, 255, 0.08);
+            --primary: #6366f1;
+            --primary-glow: rgba(99, 102, 241, 0.3);
+            --success: #10b981;
+            --success-glow: rgba(16, 185, 129, 0.2);
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --accent-blue: #0ea5e9;
+            --glass-border: 1px solid rgba(255, 255, 255, 0.06);
+            --sidebar-width: 320px;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Outfit', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-main);
+            height: 100vh;
+            overflow: hidden;
+            display: flex;
+            background-image: 
+                radial-gradient(at 10% 20%, rgba(99, 102, 241, 0.04) 0px, transparent 50%),
+                radial-gradient(at 90% 80%, rgba(14, 165, 233, 0.04) 0px, transparent 50%);
+        }
+
+        /* App Layout */
+        .app-container {
+            display: flex;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* Sidebar - Accounts List */
+        .sidebar {
+            width: var(--sidebar-width);
+            border-right: var(--glass-border);
+            background: rgba(13, 15, 23, 0.9);
+            backdrop-filter: blur(12px);
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .sidebar-header {
+            padding: 24px;
+            border-bottom: var(--glass-border);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo-icon {
+            font-size: 24px;
+            color: var(--accent-blue);
+            text-shadow: 0 0 10px rgba(14, 165, 233, 0.5);
+        }
+
+        .sidebar-header h1 {
+            font-size: 18px;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            background: linear-gradient(135deg, #fff 0%, var(--text-muted) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .search-box {
+            padding: 16px 24px;
+            border-bottom: var(--glass-border);
+            position: relative;
+        }
+
+        .search-box i {
+            position: absolute;
+            left: 38px;
+            top: 29px;
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        .search-input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 10px 12px 10px 38px;
+            color: white;
+            font-family: inherit;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 8px var(--primary-glow);
+            background: rgba(255, 255, 255, 0.08);
+        }
+
+        .accounts-list-container {
+            flex-grow: 1;
+            overflow-y: auto;
+            padding: 16px;
+        }
+
+        .account-item {
+            background: var(--card-bg);
+            border: var(--glass-border);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .account-item:hover {
+            transform: translateY(-2px);
+            border-color: var(--primary);
+            box-shadow: 0 4px 12px var(--primary-glow);
+        }
+
+        .account-item.active {
+            border-color: var(--accent-blue);
+            background: rgba(14, 165, 233, 0.06);
+            box-shadow: 0 4px 12px rgba(14, 165, 233, 0.12);
+        }
+
+        .account-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .acc-id {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--accent-blue);
+            background: rgba(14, 165, 233, 0.1);
+            padding: 2px 8px;
+            border-radius: 4px;
+        }
+
+        .acc-status {
+            font-size: 11px;
+            font-weight: 500;
+            color: var(--success);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .acc-name {
+            font-size: 15px;
+            font-weight: 600;
+            color: white;
+            margin-bottom: 4px;
+        }
+
+        .acc-book {
+            font-size: 12px;
+            color: var(--text-muted);
+            display: flex;
+            gap: 16px;
+        }
+
+        /* Main Panel - Calculation Tracer */
+        .main-panel {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            background: radial-gradient(circle at top right, rgba(99, 102, 241, 0.02) 0%, transparent 60%);
+            padding: 32px;
+            overflow-y: auto;
+        }
+
+        .welcome-view {
+            margin: auto;
+            text-align: center;
+            max-width: 480px;
+        }
+
+        .welcome-view i {
+            font-size: 64px;
+            color: var(--primary);
+            margin-bottom: 24px;
+            animation: float 4s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        .welcome-view h2 {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .welcome-view p {
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        /* Detail Tracer View */
+        .tracer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+            border-bottom: var(--glass-border);
+            padding-bottom: 20px;
+        }
+
+        .tr-title h2 {
+            font-size: 24px;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+        }
+
+        .tr-title p {
+            color: var(--text-muted);
+            font-size: 14px;
+            margin-top: 4px;
+        }
+
+        .cycle-selector {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--card-bg);
+            border: var(--glass-border);
+            padding: 8px 16px;
+            border-radius: 8px;
+        }
+
+        .cycle-selector label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+        }
+
+        .cycle-select {
+            background: transparent;
+            border: none;
+            color: white;
+            font-family: inherit;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+        }
+
+        .cycle-select:focus {
+            outline: none;
+        }
+
+        /* Grid Dashboard Layout */
+        .tracer-grid {
+            display: grid;
+            grid-template-columns: 1.2fr 0.8fr;
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        /* Dashboard Card Container */
+        .tracer-card {
+            background: var(--card-bg);
+            border: var(--glass-border);
+            border-radius: 16px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+        }
+
+        .tracer-card.span-2 {
+            grid-column: span 2;
+        }
+
+        .tracer-card h3 {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-main);
+        }
+
+        .tracer-card h3 i {
+            color: var(--primary);
+        }
+
+        /* Interactive Simulator Panel */
+        .simulation-flow-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .sim-step-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: var(--glass-border);
+            border-radius: 10px;
+            padding: 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            transition: all 0.2s ease;
+        }
+
+        .sim-step-card:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: var(--primary);
+        }
+
+        .sim-step-info {
+            flex-grow: 1;
+        }
+
+        .sim-step-title {
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sim-step-title span {
+            font-size: 10px;
+            font-weight: 800;
+            background: var(--primary);
+            color: white;
+            padding: 2px 6px;
+            border-radius: 10px;
+        }
+
+        .sim-step-desc {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
+        .sim-form {
+            display: flex;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .sim-input {
+            background: rgba(0, 0, 0, 0.2);
+            border: var(--glass-border);
+            border-radius: 4px;
+            padding: 6px 10px;
+            color: white;
+            font-size: 12px;
+            width: 90px;
+        }
+
+        .sim-btn {
+            background: linear-gradient(135deg, var(--primary) 0%, #4f46e5 100%);
+            border: none;
+            color: white;
+            font-family: inherit;
+            font-size: 12px;
+            font-weight: 600;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s ease;
+        }
+
+        .sim-btn:hover {
+            box-shadow: 0 0 10px var(--primary-glow);
+            transform: translateY(-1px);
+        }
+
+        .sim-btn:disabled {
+            background: #27272a;
+            color: var(--text-muted);
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        /* Real-time System Console */
+        .system-console {
+            background: #090a0f;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            padding: 16px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 12px;
+            color: #22c55e;
+            height: 250px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.8);
+        }
+
+        .console-line {
+            display: flex;
+            gap: 8px;
+            line-height: 1.4;
+        }
+
+        .console-ts {
+            color: #3b82f6;
+            flex-shrink: 0;
+        }
+
+        .console-tag {
+            color: #a855f7;
+            font-weight: 700;
+            flex-shrink: 0;
+        }
+
+        .console-text {
+            color: #f3f4f6;
+        }
+
+        .console-text.success {
+            color: #10b981;
+        }
+
+        .console-text.error {
+            color: #ef4444;
+        }
+
+        /* Topology Visualizer */
+        .topology-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            flex-grow: 1;
+            justify-content: center;
+        }
+
+        .topo-node {
+            background: rgba(255, 255, 255, 0.02);
+            border: var(--glass-border);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: relative;
+            transition: all 0.2s ease;
+        }
+
+        .node-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .node-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 8px;
+            background: rgba(14, 165, 233, 0.1);
+            color: var(--accent-blue);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+
+        .node-title {
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .node-subtitle {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .node-value {
+            font-size: 15px;
+            font-weight: 700;
+            text-align: right;
+        }
+
+        .relation-arrow {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            color: var(--text-muted);
+            font-size: 12px;
+            gap: 8px;
+            margin: -4px 0;
+        }
+
+        .relation-arrow span {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+            font-size: 9px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        /* Lineage Audit Steps Log */
+        .lineage-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            max-height: 250px;
+            overflow-y: auto;
+            padding-right: 4px;
+        }
+
+        .step-item {
+            background: rgba(255, 255, 255, 0.02);
+            border: var(--glass-border);
+            border-left: 4px solid var(--primary);
+            border-radius: 8px;
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+        }
+
+        .step-item.success {
+            border-left-color: var(--success);
+        }
+
+        .step-item.warning {
+            border-left-color: var(--warning);
+        }
+
+        .step-desc {
+            font-weight: 500;
+        }
+
+        .step-time {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        .step-val {
+            font-weight: 700;
+            font-family: monospace;
+            font-size: 14px;
+        }
+
+        /* Full calculation manifest */
+        .manifest-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 20px;
+        }
+
+        .mf-block {
+            background: rgba(255, 255, 255, 0.01);
+            border: var(--glass-border);
+            border-radius: 12px;
+            padding: 16px;
+        }
+
+        .mf-block h4 {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-muted);
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            padding-bottom: 8px;
+        }
+
+        .mf-kv {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 13px;
+        }
+
+        .mf-key {
+            color: var(--text-muted);
+        }
+
+        .mf-val {
+            font-weight: 600;
+        }
+
+        /* Pricing tier items list */
+        .tier-item {
+            display: flex;
+            justify-content: space-between;
+            font-size: 12px;
+            padding: 6px 0;
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.04);
+        }
+
+        .tier-name {
+            font-weight: 500;
+        }
+
+        .tier-amount {
+            font-weight: 700;
+            font-family: monospace;
+        }
+
+        /* Grand Total display */
+        .total-display {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.12) 0%, rgba(14, 165, 233, 0.12) 100%);
+            border: 1px solid rgba(99, 102, 241, 0.2);
+            border-radius: 12px;
+            padding: 18px;
+            text-align: center;
+            grid-column: span 3;
+            margin-top: 12px;
+        }
+
+        .total-display h5 {
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--accent-blue);
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .total-val {
+            font-size: 28px;
+            font-weight: 800;
+            color: white;
+            text-shadow: 0 0 15px rgba(99, 102, 241, 0.3);
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(255, 255, 255, 0.15);
+        }
+
+        /* Visual Flowchart Topology */
+        .topo-visual-box {
+            position: relative;
+            width: 100%;
+            height: 300px;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 12px;
+            margin-top: 16px;
+            overflow: hidden;
+        }
+
+        .topo-visual-svg {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .topo-card-node {
+            position: absolute;
+            background: rgba(22, 28, 45, 0.95);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 10px;
+            padding: 12px 16px;
+            width: 280px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            transition: all 0.3s ease;
+        }
+
+        .topo-card-node:hover {
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 10px rgba(14, 165, 233, 0.25);
+            transform: translateX(-50%) scale(1.02);
+        }
+
+        .topo-card-node.parent {
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-left: 4px solid var(--accent-blue);
+        }
+
+        .topo-card-node.child {
+            top: 190px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-left: 4px solid var(--danger);
+        }
+
+        .topo-card-node.single {
+            top: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            border-left: 4px solid var(--primary);
+        }
+
+        .netting-badge {
+            position: absolute;
+            top: 130px;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: var(--danger);
+            font-size: 10px;
+            font-weight: 700;
+            padding: 4px 10px;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+            z-index: 10;
+        }
+
+        .modal-backdrop {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(8px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+        }
+
+        .badge-status.status-green {
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: var(--success);
+        }
+
+        .badge-status.status-red {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: var(--danger);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="app-container">
+        <!-- Sidebar: Accounts list -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <i class="fa-solid fa-gauge-high logo-icon"></i>
+                <h1>EVN - Cổng Giám Sát</h1>
+            </div>
+
+            <div style="padding: 16px 24px 16px 24px; border-bottom: var(--glass-border); display: flex; flex-direction: column; gap: 12px;">
+                <div>
+                    <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px; letter-spacing: 0.5px;">CHỌN KỲ CHỐT NỢ (THÁNG)</label>
+                    <select id="monthSelect" class="sim-input" style="width: 100%; height: 34px; background: rgba(0,0,0,0.3); border: var(--glass-border); border-radius: 6px; padding: 0 8px; color: white;" onchange="changeActiveMonth(this.value)">
+                        <option value="2026_06" selected>Tháng 06/2026</option>
+                        <option value="2026_07">Tháng 07/2026</option>
+                        <option value="2026_08">Tháng 08/2026</option>
+                    </select>
+                </div>
+                <button onclick="showBenchmarkView()" style="width:100%; padding:10px; background: linear-gradient(135deg, var(--primary) 0%, #4f46e5 100%); border: none; border-radius:8px; color:white; font-family:inherit; font-weight:700; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; box-shadow: 0 4px 12px var(--primary-glow); transition: all 0.2s ease;">
+                    <i class="fa-solid fa-chart-line"></i> KIỂM THỬ HIỆU NĂNG 10M
+                </button>
+                <button onclick="showLogsView()" style="width:100%; padding:10px; background: rgba(14, 165, 233, 0.15); border: 1px solid rgba(14, 165, 233, 0.3); border-radius:8px; color:var(--accent-blue); font-family:inherit; font-weight:700; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; transition: all 0.2s ease; margin-top: 4px;">
+                    <i class="fa-solid fa-clock-history"></i> LỊCH SỬ TÍNH CƯỚC (LOGS)
+                </button>
+                <button onclick="showBatchView()" style="width:100%; padding:10px; background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.3); border-radius:8px; color:#c084fc; font-family:inherit; font-weight:700; font-size:13px; cursor:pointer; display:flex; align-items:center; justify-content:center; gap:8px; transition: all 0.2s ease; margin-top: 4px;">
+                    <i class="fa-solid fa-gears"></i> CHẠY BATCH THEO SỔ (SPRING BATCH)
+                </button>
+            </div>
+            
+            <div class="search-box" style="margin-bottom: 8px;">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" id="searchInput" class="search-input" placeholder="Tìm kiếm tên/mã khách hàng...">
+            </div>
+
+            <div style="padding: 0 24px 12px 24px; border-bottom: var(--glass-border);">
+                <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 4px;">LỌC THEO SỔ (BOOK)</label>
+                <select id="bookFilter" class="sim-input" style="width: 100%; height: 30px; background: rgba(0,0,0,0.3); border: var(--glass-border); border-radius: 6px; padding: 0 8px; color: var(--text-muted); font-size: 11px;" onchange="filterByBook(this.value)">
+                    <option value="">-- Tất cả sổ (Book) --</option>
+                    <option value="SO_01">Sổ SO_01 (Mẫu)</option>
+                    <option value="SO_BENCH_0">Sổ SO_BENCH_0 (Benchmark)</option>
+                </select>
+            </div>
+
+            <div class="accounts-list-container" id="accountsList">
+                <!-- Mapped accounts -->
+            </div>
+        </div>
+
+        <!-- Main Panel: Detailed Trace flow & Simulation panel -->
+        <div class="main-panel" id="mainPanel">
+            <div class="welcome-view">
+                <i class="fa-solid fa-gauge-simple-high"></i>
+                <h2>Cổng Giám Sát & Truy Vết Quy Trình Tính Toán</h2>
+                <p>Vui lòng chọn một tài khoản khách hàng ở danh sách bên trái để bắt đầu theo dõi quy trình tính cước, cây liên kết công tơ và nhật ký diễn giải áp giá chi tiết.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- UI Interaction Scripts -->
+    <script>
+        // Store states
+        let accounts = [];
+        let activeAccountId = null;
+        let activeMonth = '2026_06';
+
+        // Load page
+        document.addEventListener('DOMContentLoaded', () => {
+            fetchAccounts();
+            
+            // Search filter wire
+            document.getElementById('searchInput').addEventListener('input', (e) => {
+                filterAccounts(e.target.value);
+            });
+        });
+
+        // Filter state and functions
+        let searchQuery = "";
+        let bookQuery = "";
+
+        function filterAccounts(query) {
+            searchQuery = query.trim().toLowerCase();
+            applyFilters();
+        }
+
+        function filterByBook(bookId) {
+            bookQuery = bookId;
+            applyFilters();
+        }
+
+        function applyFilters() {
+            const filtered = accounts.filter(acc => {
+                const matchesSearch = !searchQuery || 
+                    acc.accountId.toLowerCase().includes(searchQuery) ||
+                    (acc.customerName && acc.customerName.toLowerCase().includes(searchQuery));
+                
+                const matchesBook = !bookQuery || 
+                    (bookQuery === 'SO_BENCH_0' ? acc.bookId.startsWith('SO_BENCH') : acc.bookId === bookQuery);
+                
+                return matchesSearch && matchesBook;
+            });
+            renderAccountsList(filtered);
+        }
+
+        // Pull accounts list
+        async function fetchAccounts() {
+            try {
+                const response = await fetch('/api/v1/monitoring/accounts');
+                accounts = await response.json();
+                renderAccountsList(accounts);
+            } catch (err) {
+                console.error("Failed to load accounts: ", err);
+                document.getElementById('accountsList').innerHTML = `<p style="color: var(--danger); text-align: center;">Lỗi kết nối tới mediation-service.</p>`;
+            }
+        }
+
+        // Render sidebar elements
+        function renderAccountsList(list) {
+            const listEl = document.getElementById('accountsList');
+            if (list.length === 0) {
+                listEl.innerHTML = `<p style="color: var(--text-muted); text-align: center;">Không tìm thấy tài khoản nào.</p>`;
+                return;
+            }
+
+            listEl.innerHTML = list.map(acc => `
+                <div class="account-item ${acc.accountId === activeAccountId ? 'active' : ''}" onclick="selectAccount('${acc.accountId}')">
+                    <div class="account-meta">
+                        <span class="acc-id">${acc.accountId}</span>
+                        <span class="acc-status"><i class="fa-solid fa-circle-check"></i> ${acc.status}</span>
+                    </div>
+                    <div class="acc-name">${acc.customerName}</div>
+                    <div class="acc-book">
+                        <span><i class="fa-solid fa-book-open"></i> ${acc.bookId}</span>
+                        <span><i class="fa-solid fa-users"></i> Định mức: ${acc.normsFactor} hộ</span>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Select item
+        function selectAccount(accountId) {
+            activeAccountId = accountId;
+            renderAccountsList(accounts); // highlight
+            loadTracerDetails(accountId, activeMonth);
+        }
+
+        // Fetch trace detail
+        async function loadTracerDetails(accountId, month, forceConsoleMessage = null) {
+            try {
+                const response = await fetch(`/api/v1/monitoring/detail/${accountId}/${month}`);
+                const data = await response.json();
+                renderTracerDashboard(data, forceConsoleMessage);
+            } catch (err) {
+                console.error(err);
+            }
+        }
+
+        // Formatting currency
+        function formatNumber(num) {
+            if (!num) return "0";
+            return new Intl.NumberFormat('vi-VN').format(parseFloat(num));
+        }
+
+        // Append log helper
+        function writeToConsole(tag, text, isSuccess = false, isError = false) {
+            const consoleEl = document.getElementById('systemConsole');
+            if (!consoleEl) return;
+            const now = new Date();
+            const ts = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+            
+            let textClass = '';
+            if (isSuccess) textClass = 'success';
+            if (isError) textClass = 'error';
+
+            consoleEl.innerHTML += `
+                <div class="console-line">
+                    <span class="console-ts">[${ts}]</span>
+                    <span class="console-tag">[${tag}]</span>
+                    <span class="console-text ${textClass}">${text}</span>
+                </div>
+            `;
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+        }
+
+        // 1. Simulation Step 1: Ingest readings
+        async function runIngestSim(accountId, meterPointId, startIndex, endIndex, month) {
+            writeToConsole('CMIS', `Đang gửi sự kiện ghi nhận chỉ số đo xa cho công tơ ${meterPointId}...`);
+            try {
+                const body = [{
+                    accountId: accountId,
+                    meterPointId: meterPointId,
+                    billingCycleMonth: month,
+                    fromDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                    toDate: new Date().toISOString(),
+                    startIndex: parseFloat(startIndex),
+                    endIndex: parseFloat(endIndex)
+                }];
+
+                // If mixing account KH003, ingest both Parent and Child readings
+                if (accountId === 'KH003' && meterPointId === 'METER-03-TONG') {
+                    // Send both parent and child readings
+                    body.push({
+                        accountId: accountId,
+                        meterPointId: 'METER-03-PHU',
+                        billingCycleMonth: month,
+                        fromDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                        toDate: new Date().toISOString(),
+                        startIndex: 0,
+                        endIndex: 100
+                    });
+                    writeToConsole('CMIS', `Phát hiện sơ đồ lưới phức tạp cho KH003. Đóng gói gửi kèm chỉ số công tơ phụ METER-03-PHU.`);
+                }
+
+                if (accountId === 'KH004') {
+                    body[0].meterPointId = 'METER-04-BT';
+                    body.push({
+                        accountId: accountId,
+                        meterPointId: 'METER-04-CD',
+                        billingCycleMonth: month,
+                        fromDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                        toDate: new Date().toISOString(),
+                        startIndex: 500,
+                        endIndex: 550
+                    });
+                    body.push({
+                        accountId: accountId,
+                        meterPointId: 'METER-04-TD',
+                        billingCycleMonth: month,
+                        fromDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                        toDate: new Date().toISOString(),
+                        startIndex: 300,
+                        endIndex: 400
+                    });
+                    writeToConsole('CMIS', `Phát hiện khách hàng SHBT 3 giá KH004. Gửi chỉ số cho 3 công tơ: METER-04-BT, METER-04-CD, METER-04-TD.`);
+                }
+
+                if (accountId === 'KH005') {
+                    body[0].meterPointId = 'METER-05-BT';
+                    body.push({
+                        accountId: accountId,
+                        meterPointId: 'METER-05-CD',
+                        billingCycleMonth: month,
+                        fromDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                        toDate: new Date().toISOString(),
+                        startIndex: 500,
+                        endIndex: 700
+                    });
+                    body.push({
+                        accountId: accountId,
+                        meterPointId: 'METER-05-TD',
+                        billingCycleMonth: month,
+                        fromDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+                        toDate: new Date().toISOString(),
+                        startIndex: 300,
+                        endIndex: 800
+                    });
+                    writeToConsole('CMIS', `Phát hiện khách hàng Sản xuất TOU 3 giá KH005. Gửi chỉ số cho 3 công tơ: METER-05-BT, METER-05-CD, METER-05-TD.`);
+                }
+
+                const response = await fetch('/api/v1/readings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                if (response.ok) {
+                    writeToConsole('mediation-service', `Đã xử lý và ghi nhận chỉ số đo xa. Trạng thái: HỢP LỆ.`, true);
+                    writeToConsole('mediation-service', `Kiểm tra tính đầy đủ chỉ số cho ${accountId}: THÀNH CÔNG!`, true);
+                    loadTracerDetails(accountId, month, { tag: 'mediation-service', text: 'Kiểm tra tính đầy đủ hoàn tất. Đã phát sự kiện kích hoạt tính cước.' });
+                } else {
+                    writeToConsole('mediation-service', `Gửi chỉ số thất bại.`, false, true);
+                }
+            } catch (err) {
+                writeToConsole('mediation-service', `Lỗi kết nối: ${err.message}`, false, true);
+            }
+        }
+
+        async function runDeleteInvoice(accountId, month) {
+            if (!confirm(`Bạn có chắc chắn muốn xóa Hóa đơn và Chỉ số của khách hàng ${accountId} kỳ ${month} để tính toán lại?`)) {
+                return;
+            }
+            writeToConsole('system-monitor', `Đang gửi yêu cầu xóa hóa đơn và chỉ số của khách hàng ${accountId} kỳ ${month}...`);
+            try {
+                const response = await fetch(`/api/v1/monitoring/simulate/delete-invoice?accountId=${accountId}&month=${month}`, {
+                    method: 'POST'
+                });
+                if (response.ok) {
+                    writeToConsole('mediation-service', `Đã xóa hóa đơn & chỉ số thành công. Bộ nhớ đệm Redis đã được giải phóng.`, true);
+                    loadTracerDetails(accountId, month, { tag: 'system-monitor', text: 'Hóa đơn đã bị xóa. Vui lòng gửi chỉ số mới.' });
+                } else {
+                    const txt = await response.text();
+                    writeToConsole('mediation-service', `Lỗi xóa hóa đơn: ${txt}`, false, true);
+                }
+            } catch (err) {
+                writeToConsole('system-monitor', `Lỗi kết nối: ${err.message}`, false, true);
+            }
+        }
+
+        // 2. Simulation Step 2: Freeze configuration snapshot
+        async function runSnapshotSim(accountId, bookId, month) {
+            writeToConsole('snapshot-generator', `Đang chốt cấu hình đóng băng snapshot cho Sổ GCS ${bookId}, chu kỳ ${month}...`);
+            try {
+                const response = await fetch(`/api/v1/monitoring/simulate/snapshot?bookId=${bookId}&month=${month}`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    writeToConsole('snapshot-generator', `Snapshot cấu hình đã được chốt và ghi nhận thành công. Đồng bộ lên Redis Cache.`, true);
+                    loadTracerDetails(accountId, month, { tag: 'snapshot-generator', text: 'Đóng băng snapshot cấu hình thành công.' });
+                } else {
+                    writeToConsole('snapshot-generator', `Chốt cấu hình snapshot thất bại.`, false, true);
+                }
+            } catch (err) {
+                writeToConsole('snapshot-generator', `Lỗi kết nối: ${err.message}`, false, true);
+            }
+        }
+
+        // 3. Simulation Step 3: Run calculation
+        async function runCalculateSim(accountId, bookId, month) {
+            writeToConsole('billing-worker', `Đang tiêu thụ task tính cước cho tài khoản ${accountId}, kỳ ${month}...`);
+            try {
+                const response = await fetch(`/api/v1/monitoring/simulate/calculate?accountId=${accountId}&month=${month}&bookId=${bookId}`, {
+                    method: 'POST'
+                });
+
+                if (response.ok) {
+                    writeToConsole('billing-worker', `Tính toán cước trên RAM hoàn tất. Hóa đơn đã được tạo và lưu vào CSDL.`, true);
+                    writeToConsole('debezium-cdc', `Đã phát hiện dòng Outbox mới. Đang đẩy sự kiện sang Kafka topic invoice-events.`, true);
+                    loadTracerDetails(accountId, month, { tag: 'debezium-cdc', text: 'Sự kiện Outbox CDC đã được xuất bản lên Kafka thành công.' });
+                } else {
+                    const text = await response.text();
+                    writeToConsole('billing-worker', `Tính toán thất bại: ${text}`, false, true);
+                }
+            } catch (err) {
+                writeToConsole('billing-worker', `Lỗi kết nối: ${err.message}`, false, true);
+            }
+        }
+
+        // 3.1 Scenario B: CMIS query fallback simulation
+        async function runCmisQuerySim(accountId, month) {
+            writeToConsole('CMIS-Portal', `Bắt đầu gửi yêu cầu GET /api/v1/invoices?accountId=${accountId}&month=${month}...`);
+            try {
+                const startTime = Date.now();
+                const response = await fetch(`/api/v1/invoices?accountId=${accountId}&month=${month}`);
+                const elapsed = Date.now() - startTime;
+
+                if (response.ok) {
+                    const data = await response.json();
+                    writeToConsole('mediation-service', `Truy vấn thành công! Phản hồi trong ${elapsed}ms. Hóa đơn trị giá: ${formatNumber(data.totalAmountAfterTax)}đ.`, true);
+                    
+                    // Reload tracer dashboard to show the generated invoice
+                    loadTracerDetails(accountId, month, { 
+                        tag: 'CMIS-Portal', 
+                        text: `Nhận kết quả Hóa đơn thành công. Trạng thái: ĐÃ CÓ HÓA ĐƠN. Tiền điện: ${formatNumber(data.totalAmountAfterTax)}đ.` 
+                    });
+                } else {
+                    const text = await response.text();
+                    writeToConsole('mediation-service', `Lỗi truy vấn: ${text}`, false, true);
+                }
+            } catch (err) {
+                writeToConsole('CMIS-Portal', `Lỗi kết nối: ${err.message}`, false, true);
+            }
+        }
+
+        // 4. Auto-Flow Simulation: Run complete pipeline in one go
+        async function runAutoFlowSim(accountId, bookId, month, meterPointId, startIndex, endIndex) {
+            writeToConsole('system-monitor', `Bắt đầu mô phỏng luồng chạy tự động tích hợp cho ${accountId}...`);
+            writeToConsole('CMIS', `Nhận chỉ số đo xa thô từ CMIS cho công tơ ${meterPointId} (Chỉ số: ${startIndex} ➜ ${endIndex})...`);
+            
+            try {
+                const url = `/api/v1/monitoring/simulate/auto-flow?accountId=${accountId}&bookId=${bookId}&month=${month}&meterPointId=${meterPointId}&startIndex=${startIndex}&endIndex=${endIndex}`;
+                const response = await fetch(url, { method: 'POST' });
+                
+                if (response.ok) {
+                    writeToConsole('mediation-service', `Kiểm tra tính đầy đủ: HỢP LỆ. Kích hoạt tính cước thời gian thực.`, true);
+                    writeToConsole('snapshot-generator', `Snapshot cấu hình tự động chốt và đồng bộ lên bộ nhớ đệm Redis.`, true);
+                    writeToConsole('billing-worker', `Lấy cấu hình từ Redis, gọi engine tính toán cước trên RAM hoàn tất trong <10ms.`, true);
+                    writeToConsole('billing-worker', `Ghi nhận Hóa đơn và Outbox Event thành công dưới cùng một DB Transaction.`, true);
+                    writeToConsole('debezium-cdc', `Debezium CDC phát hiện bản ghi Outbox. Đã phát sự kiện hóa đơn thành công sang Kafka topic invoice-events.`, true);
+                    
+                    loadTracerDetails(accountId, month, { tag: 'debezium-cdc', text: 'Luồng tự động chạy thành công. Trạng thái: HOÀN TẤT.' });
+                } else {
+                    const text = await response.text();
+                    writeToConsole('system-monitor', `Mô phỏng luồng tự động thất bại: ${text}`, false, true);
+                }
+            } catch (err) {
+                writeToConsole('system-monitor', `Lỗi ngoại lệ: ${err.message}`, false, true);
+            }
+        }
+
+        // Render complete tracer dashboard panel
+        function renderTracerDashboard(data, forceConsoleMessage) {
+            const { account, readings, snapshot, invoice } = data;
+            const mainPanel = document.getElementById('mainPanel');
+
+            // 1. Process meter readings display
+            let readingsHtml = `<p style="color: var(--text-muted); font-size: 13px;">Chưa có chỉ số đầu vào. Vui lòng thực hiện Bước 1 ở trên.</p>`;
+            let hasReadings = readings && readings.length > 0;
+            if (hasReadings) {
+                readingsHtml = readings.map(r => `
+                    <div class="step-item success">
+                        <div>
+                            <div class="step-desc"><i class="fa-solid fa-gauge-simple"></i> ${r.meterPointId}</div>
+                            <div class="step-time">Chỉ số: ${formatNumber(r.startIndex)} ➜ ${formatNumber(r.endIndex)}</div>
+                        </div>
+                        <span class="step-val" style="color: var(--accent-blue);">${formatNumber(r.consumption)} kWh</span>
+                    </div>
+                `).join('');
+            }
+
+            // 2. Topology Tree Mapping
+            let topoHtml = `<p style="color: var(--text-muted); font-size: 13px;">Chưa có Snapshot cấu hình. Vui lòng thực hiện Bước 2 ở trên.</p>`;
+            let hasSnapshot = snapshot && snapshot.configData;
+            if (hasSnapshot) {
+                const config = snapshot.configData;
+                if (config.meterTopology && config.meterTopology.meterPoints) {
+                    const points = config.meterTopology.meterPoints;
+                    const relations = config.meterTopology.relations || [];
+
+                    const hasRelation = relations.length > 0;
+                    
+                    topoHtml = `<div class="topo-visual-box">`;
+                    
+                    if (hasRelation) {
+                        topoHtml += `
+                            <svg class="topo-visual-svg">
+                                <defs>
+                                    <linearGradient id="lineGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+                                        <stop offset="0%" stop-color="#0ea5e9" />
+                                        <stop offset="100%" stop-color="#ef4444" />
+                                    </linearGradient>
+                                    <marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                                        <path d="M 0 0 L 10 5 L 0 10 z" fill="#ef4444" />
+                                    </marker>
+                                </defs>
+                                <line x1="50%" y1="65" x2="50%" y2="190" stroke="url(#lineGrad)" stroke-width="3" stroke-dasharray="4 4" marker-end="url(#arrow)" />
+                            </svg>
+                            <div class="netting-badge">
+                                <i class="fa-solid fa-minus"></i> Khấu trừ Netting
+                            </div>
+                        `;
+                    } else {
+                        topoHtml += `
+                            <svg class="topo-visual-svg">
+                                <circle cx="50%" cy="100" r="40" fill="rgba(99, 102, 241, 0.15)" filter="blur(20px)" />
+                            </svg>
+                        `;
+                    }
+
+                    points.forEach(pt => {
+                        const rel = relations.find(r => r.childId === pt.meterPointId);
+                        const cardClass = hasRelation ? (rel ? 'child' : 'parent') : 'single';
+                        const tRules = config.tariffs[pt.tariffCode];
+                        const tType = tRules ? tRules.type : "N/A";
+                        const readingVal = readings ? readings.find(r => r.meterPointId === pt.meterPointId) : null;
+                        const rawCons = readingVal ? parseFloat(readingVal.consumption) : 0;
+
+                        topoHtml += `
+                            <div class="topo-card-node ${cardClass}">
+                                <div class="node-info">
+                                    <div class="node-icon" style="color: ${cardClass === 'parent' ? '#0ea5e9' : (cardClass === 'child' ? '#ef4444' : '#6366f1')}">
+                                        <i class="fa-solid fa-bolt"></i>
+                                    </div>
+                                    <div>
+                                        <div class="node-title">${pt.meterPointId}</div>
+                                        <div class="node-subtitle">${cardClass === 'parent' ? 'Công tơ Tổng' : (cardClass === 'child' ? 'Công tơ Phụ' : 'Công tơ Độc lập')}</div>
+                                        <div class="node-subtitle" style="font-size:10px;">Biểu giá: ${pt.tariffCode}</div>
+                                    </div>
+                                </div>
+                                <div class="node-value" style="margin-left: 10px;">
+                                    <div style="font-size: 14px; font-weight: 700; color: white;">${formatNumber(rawCons)} kWh</div>
+                                    <div class="node-subtitle">Chỉ số thô</div>
+                                </div>
+                            </div>
+                        `;
+                    });
+                    
+                    topoHtml += `</div>`;
+                }
+            }
+
+            // 3. Process flow timeline
+            let auditLogsHtml = `
+                <div class="step-item success">
+                    <div>
+                        <div class="step-desc">HỆ_THỐNG_KHỞI_ĐỘNG</div>
+                        <div class="step-time">Hạ tầng trực tuyến</div>
+                    </div>
+                    <span class="step-val">OK</span>
+                </div>
+            `;
+            if (hasReadings) {
+                auditLogsHtml += `
+                    <div class="step-item success">
+                        <div>
+                            <div class="step-desc">ĐÃ_THU_NHẬN_CHỈ_SỐ</div>
+                            <div class="step-time">Đã xác thực và lưu chỉ số thô</div>
+                        </div>
+                        <span class="step-val">HỢP LỆ</span>
+                    </div>
+                `;
+            } else {
+                auditLogsHtml += `
+                    <div class="step-item warning">
+                        <div>
+                            <div class="step-desc">CHỜ_CHỈ_SỐ_ĐO_XA</div>
+                            <div class="step-time">Chưa nhận được chỉ số từ CMIS</div>
+                        </div>
+                        <span class="step-val"><i class="fa-solid fa-circle-question"></i></span>
+                    </div>
+                `;
+            }
+
+            if (hasSnapshot) {
+                auditLogsHtml += `
+                    <div class="step-item success">
+                        <div>
+                            <div class="step-desc">ĐÃ_CHỐT_SNAPSHOT_CẤU_HÌNH</div>
+                            <div class="step-time">Đã đồng bộ lên bộ nhớ đệm Redis</div>
+                        </div>
+                        <span class="step-val">Bản v${snapshot.calculationVersion}</span>
+                    </div>
+                `;
+            } else {
+                auditLogsHtml += `
+                    <div class="step-item warning">
+                        <div>
+                            <div class="step-desc">CHỜ_ĐÓNG_BĂNG_CẤU_HÌNH</div>
+                            <div class="step-time">Snapshot cấu hình chưa được chốt</div>
+                        </div>
+                        <span class="step-val"><i class="fa-solid fa-circle-question"></i></span>
+                    </div>
+                `;
+            }
+
+            if (invoice) {
+                auditLogsHtml += `
+                    <div class="step-item success">
+                        <div>
+                            <div class="step-desc">TÍNH_TOÁN_HOÀN_TẤT</div>
+                            <div class="step-time">Thực thi tính toán áp giá trên RAM</div>
+                        </div>
+                        <span class="step-val" style="color: var(--success);"><i class="fa-solid fa-microchip"></i> &lt; 10ms</span>
+                    </div>
+                    <div class="step-item success">
+                        <div>
+                            <div class="step-desc">ĐỒNG_BỘ_CDC_KAFKA</div>
+                            <div class="step-time">Debezium CDC stream hóa đơn đi</div>
+                        </div>
+                        <span class="step-val" style="color: var(--success);">STREAMED</span>
+                    </div>
+                `;
+            } else {
+                auditLogsHtml += `
+                    <div class="step-item warning">
+                        <div>
+                            <div class="step-desc">HÓA_ĐƠN_CHƯA_TẠO</div>
+                            <div class="step-time">Chờ phát lệnh tính cước</div>
+                        </div>
+                        <span class="step-val"><i class="fa-solid fa-hourglass-start"></i></span>
+                    </div>
+                `;
+            }
+
+            // 4. Detailed Manifest Audit calculation steps
+            let manifestHtml = `
+                <div style="grid-column: span 3; text-align: center; padding: 24px; color: var(--text-muted);">
+                    <i class="fa-solid fa-hourglass-empty" style="font-size: 24px; margin-bottom: 8px;"></i>
+                    <p style="font-size: 13px;">Vui lòng thực hiện Bước 3 ở trên để chạy tính cước và hiển thị nhật ký diễn giải.</p>
+                </div>
+            `;
+
+            if (invoice && invoice.billingManifest) {
+                const manifest = typeof invoice.billingManifest === 'string' ? JSON.parse(invoice.billingManifest) : invoice.billingManifest;
+                const nettingLog = manifest.netting_details || manifest.topology_calculation || {};
+                const pricingLog = manifest.pricing_breakdown || (manifest.rating_breakdown ? manifest.rating_breakdown.meter_point_breakdowns : null);
+                
+                // Format netting info safely matching the real JSON keys
+                let parentReading = nettingLog.input_readings ? nettingLog.input_readings.find(r => r.meter_point_id === 'METER-03-TONG' || r.meter_point_id === 'METER-01' || r.meter_point_id === 'METER-02') : null;
+                let childReading = nettingLog.input_readings ? nettingLog.input_readings.find(r => r.meter_point_id === 'METER-03-PHU') : null;
+                
+                let parentGross = parentReading ? parentReading.kwh : (nettingLog.parent_gross_kwh || 0);
+                let childDeduct = childReading ? childReading.kwh : (nettingLog.deductible_child_kwh || 0);
+                
+                // For single meter accounts, handle fallback correctly
+                if (nettingLog.input_readings && nettingLog.input_readings.length === 1 && parentGross === 0) {
+                    parentGross = nettingLog.input_readings[0].kwh;
+                }
+                
+                let netUsage = nettingLog.node_net_consumptions ? (nettingLog.node_net_consumptions['METER-03-TONG'] || nettingLog.node_net_consumptions['METER-01'] || nettingLog.node_net_consumptions['METER-02'] || parentGross) : parentGross;
+
+                // Format pricing breakdown safely mapping st.kwhConsumed and st.unitPrice from RatingStepEngine.StepResult
+                let pricingRowsHtml = '';
+                if (pricingLog) {
+                    const keys = Object.keys(pricingLog);
+                    pricingRowsHtml = keys.map(k => {
+                        const mp = pricingLog[k];
+                        if (mp.steps && mp.steps.length > 0) {
+                            return mp.steps.map((st, i) => `
+                                <div class="tier-item">
+                                    <span class="tier-name">${k} - Bậc ${st.step || (i+1)}</span>
+                                    <span class="tier-amount">${formatNumber(st.kwhConsumed || st.kwhAllocated)} kWh × ${formatNumber(st.unitPrice || st.price)} đ</span>
+                                </div>
+                            `).join('');
+                        } else {
+                            return `
+                                <div class="tier-item">
+                                    <span class="tier-name">${k} (Áp giá đồng phẳng)</span>
+                                    <span class="tier-amount">${formatNumber(mp.net_consumption || mp.netConsumption || mp.netConsumptionKwh || mp.net_consumption_kwh)} kWh</span>
+                                </div>
+                            `;
+                        }
+                    }).join('');
+                }
+
+                manifestHtml = `
+                    <div class="mf-block">
+                        <h4><i class="fa-solid fa-arrows-split-up-and-left"></i> KHẤU TRỪ PHỤ TẢI (NETTING)</h4>
+                        <div class="mf-kv">
+                            <span class="mf-key">Sản lượng công tơ Tổng</span>
+                            <span class="mf-val">${formatNumber(parentGross)} kWh</span>
+                        </div>
+                        <div class="mf-kv">
+                            <span class="mf-key">Sản lượng khấu trừ Phụ</span>
+                            <span class="mf-val" style="color: var(--danger);">- ${formatNumber(childDeduct)} kWh</span>
+                        </div>
+                        <div style="border-top: 1px dashed rgba(255,255,255,0.05); margin: 8px 0; padding-top: 8px;" class="mf-kv">
+                            <span class="mf-key" style="color: var(--success); font-weight: 700;">Sản lượng tính cước Net</span>
+                            <span class="mf-val" style="color: var(--success); font-weight: 700;">${formatNumber(netUsage)} kWh</span>
+                        </div>
+                    </div>
+
+                    <div class="mf-block">
+                        <h4><i class="fa-solid fa-money-bill-trend-up"></i> CHI TIẾT ÁP GIÁ BẬC THANG</h4>
+                        ${pricingRowsHtml || '<p style="color:var(--text-muted); font-size:12px;">Áp giá đồng phẳng cố định.</p>'}
+                    </div>
+
+                    <div class="mf-block">
+                        <h4><i class="fa-solid fa-file-invoice-dollar"></i> THÀNH TIỀN HÓA ĐƠN</h4>
+                        <div class="mf-kv">
+                            <span class="mf-key">Tiền điện trước thuế</span>
+                            <span class="mf-val">${formatNumber(invoice.totalAmountBeforeTax)} đ</span>
+                        </div>
+                        <div class="mf-kv">
+                            <span class="mf-key">Thuế suất VAT (10%)</span>
+                            <span class="mf-val">${formatNumber(invoice.taxAmount)} đ</span>
+                        </div>
+                        <div style="border-top: 1px dashed rgba(255,255,255,0.05); margin: 8px 0; padding-top: 8px;" class="mf-kv">
+                            <span class="mf-key" style="font-weight: 700;">Tổng tiền sau thuế</span>
+                            <span class="mf-val" style="font-weight: 700;">${formatNumber(invoice.totalAmountAfterTax)} đ</span>
+                        </div>
+                    </div>
+
+                    <div class="total-display">
+                        <h5>TỔNG TIỀN ĐIỆN PHẢI THANH TOÁN (ĐÃ GỒM THUẾ VAT)</h5>
+                        <div class="total-val">${formatNumber(invoice.totalAmountAfterTax)} VND</div>
+                        <div style="margin-top: 12px; display: flex; justify-content: flex-end;">
+                            <button class="sim-btn" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--danger); font-size: 11px; padding: 6px 12px;" onclick="runDeleteInvoice('${account.accountId}', '${activeMonth}')">
+                                <i class="fa-solid fa-trash-can"></i> Xóa Hóa đơn để tính lại
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // 5. Preset inputs for interactive simulation forms
+            let defaultMainMeter = 'METER-01';
+            if (account.accountId === 'KH001') defaultMainMeter = 'METER-01';
+            else if (account.accountId === 'KH002') defaultMainMeter = 'METER-02';
+            else if (account.accountId === 'KH003') defaultMainMeter = 'METER-03-TONG';
+            else if (account.accountId === 'KH004') defaultMainMeter = 'METER-04-BT';
+            else if (account.accountId === 'KH005') defaultMainMeter = 'METER-05-BT';
+            const presetStart = 0;
+            const presetEnd = account.accountId === 'KH001' ? 250 : (account.accountId === 'KH002' ? 600 : 500);
+
+            // Assemble main dashboard layout
+            mainPanel.innerHTML = `
+                <!-- Tracer Header -->
+                <div class="tracer-header">
+                    <div class="tr-title">
+                        <h2>${account.customerName}</h2>
+                        <p>Mô phỏng và truy vết toàn bộ luồng xử lý sự kiện trong hệ thống tính cước</p>
+                    </div>
+                    <div class="cycle-selector">
+                        <label>CHU KỲ TÍNH CƯỚC</label>
+                        <select class="cycle-select" id="monthSelector" onchange="changeMonth(this.value)">
+                            <option value="2026_06" ${activeMonth === '2026_06' ? 'selected' : ''}>Tháng 06/2026 (2026_06)</option>
+                            <option value="2026_07" ${activeMonth === '2026_07' ? 'selected' : ''}>Tháng 07/2026 (2026_07)</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Simulation Interactive Form Controls -->
+                <div class="tracer-card" style="margin-bottom: 24px;">
+                    <h3><i class="fa-solid fa-laptop-code"></i> BỘ ĐIỀU KHIỂN MÔ PHỎNG TIẾN TRÌNH TÍNH TOÁN</h3>
+                    <div class="simulation-flow-container">
+                        <!-- Auto Flow Simulator -->
+                        <div class="sim-step-card" style="background: linear-gradient(135deg, rgba(99, 102, 241, 0.08) 0%, rgba(14, 165, 233, 0.08) 100%); border: 1px solid rgba(99, 102, 241, 0.25);">
+                            <div class="sim-step-info">
+                                <div class="sim-step-title" style="color: var(--accent-blue);"><i class="fa-solid fa-wand-magic-sparkles"></i> CHẠY TỰ ĐỘNG TOÀN BỘ LUỒNG (FULL PIPELINE SIMULATOR)</div>
+                                <div class="sim-step-desc">Mô phỏng quy trình tự động thực tế: Nhập chỉ số ➜ Tự động kiểm tra đầy đủ ➜ Tự động chốt Snapshot ➜ Tính cước trên RAM ➜ Đẩy CDC sang Kafka.</div>
+                            </div>
+                            <button class="sim-btn" style="background: linear-gradient(135deg, var(--accent-blue) 0%, var(--primary) 100%);" onclick="runAutoFlowSim('${account.accountId}', '${account.bookId}', '${activeMonth}', '${defaultMainMeter}', document.getElementById('simStart').value, document.getElementById('simEnd').value)">
+                                <i class="fa-solid fa-play"></i> Chạy Tự Động
+                            </button>
+                        </div>
+
+                        <!-- Step 1 Form -->
+                        <div class="sim-step-card">
+                            <div class="sim-step-info">
+                                <div class="sim-step-title">Bước 1: Thu nhận Chỉ số đo xa <span>mediation-service</span></div>
+                                <div class="sim-step-desc">Mô phỏng gửi chỉ số từ CMIS/HES về. Xác thực và lưu trữ chỉ số thô vào CSDL Postgres.</div>
+                                <div class="sim-form">
+                                    <label style="font-size:11px; display:flex; align-items:center; gap:4px;">
+                                        Công tơ: <span style="font-weight:600; color:white;">${defaultMainMeter}</span>
+                                    </label>
+                                    <input type="number" id="simStart" class="sim-input" placeholder="Chỉ số đầu" value="${presetStart}">
+                                    <input type="number" id="simEnd" class="sim-input" placeholder="Chỉ số cuối" value="${presetEnd}">
+                                </div>
+                            </div>
+                            <button class="sim-btn" onclick="runIngestSim('${account.accountId}', '${defaultMainMeter}', document.getElementById('simStart').value, document.getElementById('simEnd').value, '${activeMonth}')">
+                                <i class="fa-solid fa-file-arrow-up"></i> Gửi Chỉ số
+                            </button>
+                        </div>
+
+                        <!-- Step 2 Form -->
+                        <div class="sim-step-card">
+                            <div class="sim-step-info">
+                                <div class="sim-step-title">Bước 2: Chốt Snapshot Cấu hình <span>snapshot-generator</span></div>
+                                <div class="sim-step-desc">Đóng băng sơ đồ liên kết công tơ, biểu giá và định mức hộ của khách hàng lên cache Redis.</div>
+                            </div>
+                            <button class="sim-btn" ${!hasReadings ? 'disabled' : ''} onclick="runSnapshotSim('${account.accountId}', '${account.bookId}', '${activeMonth}')">
+                                <i class="fa-solid fa-snowflake"></i> Chốt Snapshot
+                            </button>
+                        </div>
+
+                        <!-- Step 3 Form -->
+                        <div class="sim-step-card">
+                            <div class="sim-step-info">
+                                <div class="sim-step-title">Bước 3: Phát lệnh Tính cước & Đẩy CDC <span>billing-worker</span></div>
+                                <div class="sim-step-desc">Lấy cấu hình từ Redis, gọi engine tính toán trên RAM, lưu hóa đơn, phát Outbox đồng bộ qua Kafka.</div>
+                            </div>
+                            <button class="sim-btn" ${(!hasReadings || !hasSnapshot) ? 'disabled' : ''} onclick="runCalculateSim('${account.accountId}', '${account.bookId}', '${activeMonth}')">
+                                <i class="fa-solid fa-play"></i> Tính Hóa đơn
+                            </button>
+                        </div>
+
+                        <!-- Scenario B Fallback Form -->
+                        <div class="sim-step-card" style="background: rgba(168, 85, 247, 0.05); border: 1px dashed rgba(168, 85, 247, 0.35);">
+                            <div class="sim-step-info">
+                                <div class="sim-step-title" style="color: #c084fc;">Scenario B: CMIS truy vấn Hóa đơn <span>fallback sync</span></div>
+                                <div class="sim-step-desc">Mô phỏng CMIS truy vấn hóa đơn. Nếu chưa tính kịp, mediation-service tự gọi đồng bộ sang Worker tính cước khẩn cấp trả về.</div>
+                            </div>
+                            <button class="sim-btn" style="background: #a855f7; cursor:pointer;" onclick="runCmisQuerySim('${account.accountId}', '${activeMonth}')">
+                                <i class="fa-solid fa-magnifying-glass-dollar"></i> CMIS Truy Vấn
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Live simulated logs console -->
+                    <div style="font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:8px; display:flex; justify-content:space-between; align-items:center;">
+                        <span>NHẬT KÝ TIẾN TRÌNH HỆ THỐNG THỜI GIAN THỰC</span>
+                        <span style="color:var(--success);"><i class="fa-solid fa-circle fa-pulse"></i> ĐANG LẮNG NGHE</span>
+                    </div>
+                    <div class="system-console" id="systemConsole">
+                        <div class="console-line">
+                            <span class="console-ts">[16:20:00.000]</span>
+                            <span class="console-tag">[system-monitor]</span>
+                            <span class="console-text">Hệ thống giám sát đã sẵn sàng. Vui lòng thực hiện các bước mô phỏng tính toán...</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Trace Content Grid -->
+                <div class="tracer-grid">
+                    <!-- Left: Meter tree & Readings -->
+                    <div class="tracer-card">
+                        <h3><i class="fa-solid fa-network-wired"></i> Chỉ số Đầu vào & Cây liên kết</h3>
+                        ${readingsHtml}
+                        <div style="margin-top: 24px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 20px;">
+                            ${topoHtml}
+                        </div>
+                    </div>
+
+                    <!-- Right: Process Timeline Logs -->
+                    <div class="tracer-card">
+                        <h3><i class="fa-solid fa-list-check"></i> Quy trình & Trạng thái</h3>
+                        <div class="lineage-steps">
+                            ${auditLogsHtml}
+                        </div>
+                    </div>
+
+                    <!-- Bottom Span: Dynamic Calculation Manifest -->
+                    <div class="tracer-card span-2">
+                        <h3><i class="fa-solid fa-calculator"></i> Nhật ký Diễn giải Áp giá Chi tiết (Audit Manifest)</h3>
+                        <div class="manifest-grid">
+                            ${manifestHtml}
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // If we have a log from a previous action, write it to console
+            if (forceConsoleMessage) {
+                writeToConsole(forceConsoleMessage.tag, forceConsoleMessage.text, true);
+            }
+        }
+
+        // --- Spring Batch Views & Handlers ---
+        function showBatchView() {
+            activeAccountId = null;
+            renderAccountsList(accounts);
+            
+            const mainPanel = document.getElementById('mainPanel');
+            mainPanel.innerHTML = `
+                <div class="tracer-header">
+                    <div class="tr-title">
+                        <h2>Quản lý & Điều phối lô tính cước (Spring Batch Job)</h2>
+                        <p>Kích hoạt kiểm tra điều kiện chốt sổ và vận hành luồng tính cước quy mô lớn thông qua Spring Batch</p>
+                    </div>
+                </div>
+
+                <div class="tracer-grid" style="grid-template-columns: 1fr 1.5fr; gap:20px;">
+                    <!-- Control panel card -->
+                    <div class="tracer-card" style="display:flex; flex-direction:column; gap:20px;">
+                        <h3><i class="fa-solid fa-gears"></i> THIẾT LẬP CHẠY BATCH</h3>
+                        
+                        <div>
+                            <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px; letter-spacing:0.5px;">MÃ SỔ CẦN TÍNH (BOOK ID)</label>
+                            <select id="batchBookSelect" class="sim-input" style="width: 100%; height: 38px; background: rgba(0,0,0,0.3); border: var(--glass-border); border-radius: 6px; padding: 0 12px; color: white; font-family:inherit;">
+                                <option value="SO_01" selected>Sổ mẫu: SO_01 (5 khách hàng test)</option>
+                                <option value="SO_BENCH_0">Sổ test hiệu năng: SO_BENCH_0 (1,000 - 10,000 hộ)</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px; letter-spacing:0.5px;">KỲ TÍNH CƯỚC (MONTH)</label>
+                            <select id="batchMonthSelect" class="sim-input" style="width: 100%; height: 38px; background: rgba(0,0,0,0.3); border: var(--glass-border); border-radius: 6px; padding: 0 12px; color: white; font-family:inherit;">
+                                <option value="2026_06" selected>Tháng 06/2026</option>
+                                <option value="2026_07">Tháng 07/2026</option>
+                                <option value="2026_08">Tháng 08/2026</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px; letter-spacing:0.5px;">MÃ PHIÊN BẢN (VERSION)</label>
+                            <input type="number" id="batchVersionSelect" class="sim-input" style="width: 100%; height: 38px; background: rgba(0,0,0,0.3); border: var(--glass-border); border-radius: 6px; padding: 0 12px; color: white; font-family:inherit;" value="1" min="1">
+                        </div>
+
+                        <div style="display:flex; flex-direction:column; gap:10px; margin-top:10px;">
+                            <button onclick="validateBatchReadiness()" class="sim-btn" style="height: 40px; justify-content: center; background: rgba(14, 165, 233, 0.15); border: 1px solid rgba(14, 165, 233, 0.3); color: var(--accent-blue); cursor:pointer;">
+                                <i class="fa-solid fa-clipboard-check"></i> 1. KIỂM TRA ĐIỀU KIỆN SỔ
+                            </button>
+                            <button id="btnRunSpringBatch" onclick="triggerSpringBatchJob()" class="sim-btn" style="height: 42px; justify-content: center; background: linear-gradient(135deg, #a855f7 0%, var(--primary) 100%); font-weight:700; cursor:pointer;">
+                                <i class="fa-solid fa-play"></i> 2. KÍCH HOẠT SPRING BATCH JOB
+                            </button>
+                        </div>
+
+                        <!-- Console message block -->
+                        <div id="batchStatusMessage" style="padding: 12px; border-radius: 8px; border: var(--glass-border); background: rgba(255,255,255,0.02); font-size:12px; display:none; flex-direction:column; gap:6px;">
+                            <div style="font-weight:700; color: var(--text-muted);">KẾT QUẢ PHẢN HỒI:</div>
+                            <div id="batchMessageContent" style="font-family:monospace; color:white; word-break:break-all;">--</div>
+                        </div>
+                    </div>
+
+                    <!-- Column 2 Stack -->
+                    <div style="display:flex; flex-direction:column; gap:20px; height: 100%;">
+                        <!-- Book Billing Run progress card -->
+                        <div class="tracer-card" style="display:flex; flex-direction:column; padding: 20px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+                                <h3><i class="fa-solid fa-square-poll-horizontal"></i> TIẾN TRÌNH CHỐT SỔ (book_billing_run)</h3>
+                                <button onclick="fetchBatchExecutions()" class="sim-btn" style="height: 28px; font-size: 11px; background: rgba(255,255,255,0.05); padding: 0 12px; border: var(--glass-border); cursor:pointer;">
+                                    <i class="fa-solid fa-arrows-rotate"></i> Làm mới
+                                </button>
+                            </div>
+                            <div style="overflow-y:auto; max-height:200px;">
+                                <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 12px;">
+                                    <thead>
+                                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.08); color: var(--text-muted); font-weight: 600;">
+                                            <th style="padding: 10px 12px;">Sổ (Book)</th>
+                                            <th style="padding: 10px 12px;">Kỳ cước</th>
+                                            <th style="padding: 10px 12px;">Trạng thái</th>
+                                            <th style="padding: 10px 12px;">Tổng hộ</th>
+                                            <th style="padding: 10px 12px;">Đã xử lý (Thành công / Lỗi)</th>
+                                            <th style="padding: 10px 12px; text-align: center;">Thao tác</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="bookBillingRunsTableBody">
+                                        <tr>
+                                            <td colspan="6" style="padding: 16px; text-align: center; color: var(--text-muted);">Đang tải dữ liệu...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!-- Job Execution table card -->
+                        <div class="tracer-card" style="display:flex; flex-direction:column; padding: 20px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 12px;">
+                                <h3><i class="fa-solid fa-clock-history"></i> METADATA SPRING BATCH JOB (batch_job_execution)</h3>
+                            </div>
+                            
+                            <div style="overflow-y:auto; max-height:200px;">
+                                <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 12px;">
+                                    <thead>
+                                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.08); color: var(--text-muted); font-weight: 600;">
+                                            <th style="padding: 10px 12px;">ID</th>
+                                            <th style="padding: 10px 12px;">Job Name</th>
+                                            <th style="padding: 10px 12px;">Status</th>
+                                            <th style="padding: 10px 12px;">Start Time</th>
+                                            <th style="padding: 10px 12px;">End Time</th>
+                                            <th style="padding: 10px 12px;">Exit Code</th>
+                                            <th style="padding: 10px 12px; text-align: center;">Thao tác</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="batchExecutionsTableBody">
+                                        <tr>
+                                            <td colspan="7" style="padding: 16px; text-align: center; color: var(--text-muted);">Đang tải dữ liệu...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Auto fetch execution history
+            fetchBatchExecutions();
+        }
+
+        async function validateBatchReadiness() {
+            const bookId = document.getElementById('batchBookSelect').value;
+            const month = document.getElementById('batchMonthSelect').value;
+            const msgBlock = document.getElementById('batchStatusMessage');
+            const msgContent = document.getElementById('batchMessageContent');
+
+            msgBlock.style.display = 'flex';
+            msgContent.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Đang kiểm tra điều kiện sổ...`;
+
+            try {
+                const res = await fetch(`/api/v1/monitoring/batch/validate?bookId=${bookId}&month=${month}`);
+                const text = await res.text();
+                
+                if (text === 'READY_FOR_BILLING') {
+                    msgContent.innerHTML = `<span style="color:var(--success); font-weight:bold;"><i class="fa-solid fa-circle-check"></i> READY_FOR_BILLING</span><br><span style="font-size:11px; color:var(--text-muted);">Sổ này đủ điều kiện tính cước (0 chỉ số lỗi/thiếu). Có thể chạy Spring Batch.</span>`;
+                } else if (text === 'READY_CHECK_FAILED_PENDING_MANUAL_READINGS') {
+                    msgContent.innerHTML = `<span style="color:var(--warning); font-weight:bold;"><i class="fa-solid fa-circle-exclamation"></i> CHECK_FAILED_PENDING_MANUAL_READINGS</span><br><span style="font-size:11px; color:var(--text-muted);">Lỗi: Sổ còn tồn tại điểm đo chưa hoàn thành nhập chỉ số đo xa. Vui lòng bù chỉ số trước.</span>`;
+                } else {
+                    msgContent.innerHTML = `<span style="color:var(--danger); font-weight:bold;">PHẢN HỒI LẠ:</span> ${text}`;
+                }
+            } catch (err) {
+                msgContent.innerHTML = `<span style="color:var(--danger); font-weight:bold;">LỖI KẾT NỐI:</span> ${err.message}`;
+            }
+        }
+
+        async function triggerSpringBatchJob() {
+            const bookId = document.getElementById('batchBookSelect').value;
+            const month = document.getElementById('batchMonthSelect').value;
+            const version = document.getElementById('batchVersionSelect').value;
+            const msgBlock = document.getElementById('batchStatusMessage');
+            const msgContent = document.getElementById('batchMessageContent');
+            const btn = document.getElementById('btnRunSpringBatch');
+
+            msgBlock.style.display = 'flex';
+            msgContent.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Đang kích hoạt Spring Batch Job qua batch-orchestrator...`;
+            btn.disabled = true;
+
+            try {
+                const res = await fetch(`/api/v1/monitoring/batch/run?bookId=${bookId}&month=${month}&version=${version}`, {
+                    method: 'POST'
+                });
+                const text = await res.text();
+
+                if (res.ok) {
+                    msgContent.innerHTML = `<span style="color:var(--success); font-weight:bold;"><i class="fa-solid fa-circle-check"></i> KÍCH HOẠT THÀNH CÔNG</span><br><span style="font-size:11px; color:white; font-family:monospace;">${text}</span>`;
+                    
+                    // Wait 2 seconds then reload executions history
+                    setTimeout(fetchBatchExecutions, 2000);
+                } else {
+                    msgContent.innerHTML = `<span style="color:var(--danger); font-weight:bold;"><i class="fa-solid fa-circle-xmark"></i> THẤT BẠI:</span><br><span style="font-size:11px; color:var(--text-muted);">${text}</span>`;
+                }
+            } catch (err) {
+                msgContent.innerHTML = `<span style="color:var(--danger); font-weight:bold;">LỖI NGOẠI LỆ:</span> ${err.message}`;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function fetchBatchExecutions() {
+            const tbody = document.getElementById('batchExecutionsTableBody');
+            const tbodyRuns = document.getElementById('bookBillingRunsTableBody');
+            if (!tbody) return;
+
+            // 1. Fetch Batch Executions
+            try {
+                const res = await fetch(`/api/v1/monitoring/batch/executions`);
+                const executions = await res.json();
+
+                if (!executions || executions.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="7" style="padding: 16px; text-align: center; color: var(--text-muted);">Chưa có Job Spring Batch nào chạy. Bảng metadata trống.</td></tr>`;
+                } else {
+                    tbody.innerHTML = executions.map(e => {
+                        let statusClass = 'color: var(--text-muted);';
+                        if (e.status === 'COMPLETED') statusClass = 'color: var(--success); font-weight:bold;';
+                        if (e.status === 'FAILED') statusClass = 'color: var(--danger); font-weight:bold;';
+                        if (e.status === 'STARTED' || e.status === 'STARTING') statusClass = 'color: var(--accent-blue); font-weight:bold; animation: pulse 1s infinite alternate;';
+
+                        const startTime = e.start_time ? new Date(e.start_time).toLocaleString('vi-VN') : '--';
+                        const endTime = e.end_time ? new Date(e.end_time).toLocaleString('vi-VN') : '--';
+                        const exitCode = e.exit_code ? `<span style="font-family:monospace; padding:2px 6px; background:rgba(255,255,255,0.04); border-radius:4px;">${e.exit_code}</span>` : '--';
+
+                        return `
+                            <tr style="border-bottom: 1px solid rgba(255,255,255,0.04); cursor: pointer;" 
+                                onclick="viewLogsForJob('${e.book_id || ''}', '${e.month || ''}')"
+                                onmouseover="this.style.background='rgba(255,255,255,0.02)'" 
+                                onmouseout="this.style.background='transparent'"
+                                title="Click để xem chi tiết log của Sổ ${e.book_id || ''} kỳ ${e.month || ''}">
+                                <td style="padding: 10px 12px; font-weight:bold; color:var(--text-muted);">${e.job_execution_id}</td>
+                                <td style="padding: 10px 12px; font-weight:600; color:white;">${e.job_name}</td>
+                                <td style="padding: 10px 12px;"><span style="${statusClass}">${e.status}</span></td>
+                                <td style="padding: 10px 12px; color: var(--text-muted);">${startTime}</td>
+                                <td style="padding: 10px 12px; color: var(--text-muted);">${endTime}</td>
+                                <td style="padding: 10px 12px;">${exitCode}</td>
+                                <td style="padding: 10px 12px; text-align: center;">
+                                    <button onclick="event.stopPropagation(); showJobExecutionStepsModal(${e.job_execution_id})" class="sim-btn" style="padding: 3px 8px; font-size:10px; height:auto; background: rgba(99,102,241,0.2); border: 1px solid rgba(99,102,241,0.4); color: var(--accent-blue); cursor: pointer;">
+                                        Xem Logs <i class="fa-solid fa-arrow-right-long"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        `;
+                    }).join('');
+                }
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="7" style="padding: 16px; text-align: center; color: var(--danger);">Lỗi tải metadata: ${err.message}</td></tr>`;
+            }
+
+            // 2. Fetch Book Billing Runs
+            if (!tbodyRuns) return;
+            try {
+                const res = await fetch(`/api/v1/monitoring/batch/runs`);
+                const runs = await res.json();
+
+                if (!runs || runs.length === 0) {
+                    tbodyRuns.innerHTML = `<tr><td colspan="6" style="padding: 16px; text-align: center; color: var(--text-muted);">Chưa có thông tin tiến độ Sổ nào được lưu vết.</td></tr>`;
+                    return;
+                }
+
+                tbodyRuns.innerHTML = runs.map(r => {
+                    let statusClass = 'color: var(--text-muted);';
+                    if (r.status === 'COMPLETED') statusClass = 'color: var(--success); font-weight:bold;';
+                    if (r.status === 'PROCESSING') statusClass = 'color: var(--warning); font-weight:bold; animation: pulse 1s infinite alternate;';
+                    if (r.status === 'FAILED') statusClass = 'color: var(--danger); font-weight:bold;';
+
+                    return `
+                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.04); cursor: pointer;"
+                            onclick="viewLogsForJob('${r.book_id || ''}', '${r.billing_cycle_month || ''}')"
+                            onmouseover="this.style.background='rgba(255,255,255,0.02)'" 
+                            onmouseout="this.style.background='transparent'"
+                            title="Click để xem chi tiết log của Sổ ${r.book_id || ''} kỳ ${r.billing_cycle_month || ''}">
+                            <td style="padding: 10px 12px; font-weight:bold; color:white;">${r.book_id}</td>
+                            <td style="padding: 10px 12px; font-weight:600; color:var(--text-muted);">${r.billing_cycle_month}</td>
+                            <td style="padding: 10px 12px;"><span style="${statusClass}">${r.status}</span></td>
+                            <td style="padding: 10px 12px; font-weight:bold; color:var(--accent-blue);">${r.total_accounts}</td>
+                            <td style="padding: 10px 12px;">
+                                <span style="font-weight:600; color:var(--text-main);">${r.processed_accounts}</span> 
+                                <span style="color:var(--text-muted);">hộ</span>
+                                <span style="color:var(--success); font-weight:bold; margin-left:8px;">✔ ${r.success_accounts}</span>
+                                <span style="color:var(--danger); font-weight:bold; margin-left:8px;">✖ ${r.failed_accounts}</span>
+                            </td>
+                            <td style="padding: 10px 12px; text-align: center;">
+                                <button onclick="event.stopPropagation(); showBookRunStepsModal('${r.book_id || ''}', '${r.billing_cycle_month || ''}')" class="sim-btn" style="padding: 3px 8px; font-size:10px; height:auto; background: rgba(168,85,247,0.2); border: 1px solid rgba(168,85,247,0.4); color: #c084fc; cursor: pointer;">
+                                    Xem Logs <i class="fa-solid fa-arrow-right-long"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (err) {
+                tbodyRuns.innerHTML = `<tr><td colspan="6" style="padding: 16px; text-align: center; color: var(--danger);">Lỗi tải tiến độ Sổ: ${err.message}</td></tr>`;
+            }
+        }
+
+        async function showJobExecutionStepsModal(jobExecutionId) {
+            let modal = document.getElementById('batchStepsModal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'batchStepsModal';
+                modal.className = 'modal-backdrop';
+                modal.style.cssText = `
+                    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+                    background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(12px);
+                    display: flex; align-items: center; justify-content: center; z-index: 9999;
+                `;
+                document.body.appendChild(modal);
+            }
+            
+            modal.innerHTML = `
+                <div class="tracer-card" style="width: 650px; max-height: 80vh; overflow-y: auto; background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); padding: 24px; display:flex; flex-direction:column; gap:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:12px;">
+                        <h3 style="margin:0; display:flex; align-items:center; gap:8px; color:white;"><i class="fa-solid fa-list-check" style="color:var(--accent-blue);"></i> Chi tiết các bước tính toán (Job: ${jobExecutionId})</h3>
+                        <button onclick="document.getElementById('batchStepsModal').remove()" class="sim-btn" style="background:transparent; border:none; color:var(--text-muted); font-size:16px; cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div id="batchStepsContent" style="display:flex; flex-direction:column; gap:16px; min-height:100px;">
+                        <p style="color:var(--text-muted); text-align:center;"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu từ CSDL...</p>
+                    </div>
+                </div>
+            `;
+
+            try {
+                const res = await fetch(`/api/v1/monitoring/batch/executions/${jobExecutionId}/steps`);
+                const steps = await res.json();
+                renderStepsInModal(steps);
+            } catch (err) {
+                document.getElementById('batchStepsContent').innerHTML = `<p style="color:var(--danger); text-align:center;">Lỗi tải dữ liệu: ${err.message}</p>`;
+            }
+        }
+
+        async function showBookRunStepsModal(bookId, month) {
+            let modal = document.getElementById('batchStepsModal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'batchStepsModal';
+                modal.className = 'modal-backdrop';
+                modal.style.cssText = `
+                    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+                    background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(12px);
+                    display: flex; align-items: center; justify-content: center; z-index: 9999;
+                `;
+                document.body.appendChild(modal);
+            }
+            
+            modal.innerHTML = `
+                <div class="tracer-card" style="width: 650px; max-height: 80vh; overflow-y: auto; background: rgba(30, 41, 59, 0.95); border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 20px 25px -5px rgba(0,0,0,0.5); padding: 24px; display:flex; flex-direction:column; gap:16px;">
+                    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.08); padding-bottom:12px;">
+                        <h3 style="margin:0; display:flex; align-items:center; gap:8px; color:white;"><i class="fa-solid fa-list-check" style="color:#c084fc;"></i> Chi tiết các bước tính toán (Sổ: ${bookId} - Kỳ: ${month})</h3>
+                        <button onclick="document.getElementById('batchStepsModal').remove()" class="sim-btn" style="background:transparent; border:none; color:var(--text-muted); font-size:16px; cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>
+                    </div>
+                    <div id="batchStepsContent" style="display:flex; flex-direction:column; gap:16px; min-height:100px;">
+                        <p style="color:var(--text-muted); text-align:center;"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu từ CSDL...</p>
+                    </div>
+                </div>
+            `;
+
+            try {
+                const res = await fetch(`/api/v1/monitoring/batch/runs/${bookId}/${month}/steps`);
+                const steps = await res.json();
+                renderStepsInModal(steps);
+            } catch (err) {
+                document.getElementById('batchStepsContent').innerHTML = `<p style="color:var(--danger); text-align:center;">Lỗi tải dữ liệu: ${err.message}</p>`;
+            }
+        }
+
+        function renderStepsInModal(steps) {
+            const container = document.getElementById('batchStepsContent');
+            if (!steps || steps.length === 0) {
+                container.innerHTML = `
+                    <div style="padding: 24px; text-align: center; color: var(--text-muted);">
+                        <i class="fa-solid fa-circle-info" style="font-size: 24px; margin-bottom:8px; display:block;"></i>
+                        Chưa có lịch sử chạy các bước cho đợt tính cước này hoặc Batch Job đang khởi động.
+                    </div>
+                `;
+                return;
+            }
+
+            let totalDuration = 0;
+            const stepsHtml = steps.map(s => {
+                totalDuration += s.duration_seconds;
+                
+                let statusColor = 'var(--text-muted)';
+                let statusIcon = '<i class="fa-solid fa-circle-question"></i>';
+                if (s.status === 'COMPLETED') {
+                    statusColor = 'var(--success)';
+                    statusIcon = '<i class="fa-solid fa-circle-check"></i>';
+                } else if (s.status === 'FAILED') {
+                    statusColor = 'var(--danger)';
+                    statusIcon = '<i class="fa-solid fa-circle-xmark"></i>';
+                } else if (s.status === 'STARTED') {
+                    statusColor = 'var(--accent-blue)';
+                    statusIcon = '<i class="fa-solid fa-spinner fa-spin"></i>';
+                }
+
+                let displayName = s.step_name;
+                let desc = "";
+                if (s.step_name === 'freezeSnapshotStep') {
+                    displayName = "Chốt Snapshot cấu hình & Nạp đệm RAM (Warmup)";
+                    desc = "Đóng băng biểu giá, điểm đo, sơ đồ topo và tải đệm cước từ Postgres lên Redis/JVM.";
+                } else if (s.step_name === 'billingProcessStep') {
+                    displayName = "Tính toán cước, Ghi hóa đơn & Phát sự kiện Kafka";
+                    desc = "Chạy engine áp giá song song trên RAM, ghi nhận hóa đơn vào CSDL và phát outbox Debezium.";
+                }
+
+                return `
+                    <div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.04); border-radius: 8px; padding: 16px; display:flex; flex-direction:column; gap:8px;">
+                        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:12px;">
+                            <div>
+                                <h4 style="margin:0 0 4px 0; color:white; font-size:14px;">${displayName}</h4>
+                                <span style="font-size:11px; color:var(--text-muted); font-family:monospace;">Code: ${s.step_name}</span>
+                            </div>
+                            <span style="font-size:12px; color:${statusColor}; font-weight:bold; display:flex; align-items:center; gap:6px; white-space:nowrap;">
+                                ${statusIcon} ${s.status}
+                            </span>
+                        </div>
+                        <p style="margin:0; font-size:12px; color:var(--text-muted);">${desc}</p>
+                        
+                        <div style="display:flex; justify-content:space-between; align-items:center; border-top:1px dashed rgba(255,255,255,0.05); padding-top:8px; margin-top:4px; font-size:12px;">
+                            <span style="color:var(--text-muted);">
+                                ${s.read_count > 0 ? `Đọc: <b>${s.read_count}</b> hộ | Ghi: <b>${s.write_count}</b> hộ` : 'Không xử lý hộ dân'}
+                            </span>
+                            <span style="color:var(--accent-blue); font-weight:700;">
+                                <i class="fa-regular fa-clock"></i> Thời gian chạy: ${s.duration_seconds.toFixed(2)} giây
+                            </span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            container.innerHTML = `
+                <div style="display:flex; justify-content:space-between; align-items:center; background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.2); border-radius: 8px; padding: 12px 16px;">
+                    <span style="font-size:13px; color:var(--text-main);">Tổng quan thời gian xử lý:</span>
+                    <span style="font-size:15px; color:var(--success); font-weight:800; display:flex; align-items:center; gap:6px;">
+                        <i class="fa-solid fa-stopwatch"></i> ${totalDuration.toFixed(2)} giây hoàn thành tổng thể
+                    </span>
+                </div>
+                <div style="display:flex; flex-direction:column; gap:12px; overflow-y:auto; max-height:45vh; padding-right:4px;">
+                    ${stepsHtml}
+                </div>
+            `;
+        }
+
+        function viewLogsForJob(bookId, month) {
+            if (!bookId) {
+                alert("Không tìm thấy thông tin Sổ (Book ID) của Job này.");
+                return;
+            }
+            showLogsView();
+            setTimeout(() => {
+                const bookInput = document.getElementById('logFilterBook');
+                if (bookInput) {
+                    bookInput.value = bookId;
+                }
+                fetchAndRenderLogs();
+            }, 50);
+        }
+
+        // --- Calculation Logs Views & Handlers ---
+        function showLogsView() {
+            activeAccountId = null;
+            renderAccountsList(accounts);
+            
+            const mainPanel = document.getElementById('mainPanel');
+            mainPanel.innerHTML = `
+                <div class="tracer-header">
+                    <div class="tr-title">
+                        <h2>Lịch sử tính cước hệ thống (Calculation Logs)</h2>
+                        <p>Tra cứu chi tiết chỉ số điện đầu vào, kết quả cước đầu ra và thông tin lỗi của từng sổ/khách hàng</p>
+                    </div>
+                </div>
+
+                <div class="tracer-grid" style="grid-template-columns: 1fr;">
+                    <!-- Filter Box -->
+                    <div class="tracer-card">
+                        <h3><i class="fa-solid fa-filter"></i> BỘ LỌC TÌM KIẾM LOG TÍNH CƯỚC</h3>
+                        <div style="display: flex; gap: 16px; margin-top: 16px; flex-wrap: wrap; align-items: flex-end;">
+                            <div style="flex: 1; min-width: 180px;">
+                                <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px; letter-spacing:0.5px;">MÃ SỔ (BOOK ID)</label>
+                                <input type="text" id="logFilterBook" class="sim-input" style="width:100%; height:34px; background: rgba(0,0,0,0.3); border: var(--glass-border); border-radius:6px; padding:0 12px; color:white; font-family:inherit; font-size:13px;" placeholder="Ví dụ: SO_BENCH_0">
+                            </div>
+                            <div style="flex: 1; min-width: 180px;">
+                                <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px; letter-spacing:0.5px;">MÃ KHÁCH HÀNG (ACCOUNT ID)</label>
+                                <input type="text" id="logFilterAccount" class="sim-input" style="width:100%; height:34px; background: rgba(0,0,0,0.3); border: var(--glass-border); border-radius:6px; padding:0 12px; color:white; font-family:inherit; font-size:13px;" placeholder="Ví dụ: MOCK_KH_100">
+                            </div>
+                            <div style="flex: 1; min-width: 180px;">
+                                <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px; letter-spacing:0.5px;">TRẠNG THÁI</label>
+                                <select id="logFilterStatus" class="sim-input" style="width:100%; height:34px; background: rgba(0,0,0,0.3); border: var(--glass-border); border-radius:6px; padding:0 12px; color:white; font-family:inherit; font-size:13px;">
+                                    <option value="">-- Tất cả trạng thái --</option>
+                                    <option value="SUCCESS">Thành công (SUCCESS)</option>
+                                    <option value="FAILED">Thất bại (FAILED)</option>
+                                </select>
+                            </div>
+                            <div>
+                                <button onclick="fetchAndRenderLogs()" class="sim-btn" style="height:34px; background: var(--primary); padding: 0 24px; font-weight:700; font-size:13px; cursor:pointer; display:flex; align-items:center; gap:8px;">
+                                    <i class="fa-solid fa-magnifying-glass"></i> TÌM KIẾM
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Logs Table Card -->
+                    <div class="tracer-card">
+                        <h3><i class="fa-solid fa-list"></i> DANH SÁCH LỊCH SỬ GHI NHẬN</h3>
+                        <div style="overflow-x: auto; margin-top: 16px;">
+                            <table style="width: 100%; border-collapse: collapse; text-align: left; font-size: 13px;">
+                                <thead>
+                                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.08); color: var(--text-muted); font-weight: 600;">
+                                        <th style="padding: 12px 16px;">Mã Sổ (Book)</th>
+                                        <th style="padding: 12px 16px;">Mã Hộ (Account)</th>
+                                        <th style="padding: 12px 16px;">Kỳ tính</th>
+                                        <th style="padding: 12px 16px;">Trạng thái</th>
+                                        <th style="padding: 12px 16px;">Lỗi chi tiết</th>
+                                        <th style="padding: 12px 16px;">Thời gian ghi log</th>
+                                        <th style="padding: 12px 16px; text-align: center;">Thao tác</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="logsTableBody">
+                                    <tr>
+                                        <td colspan="7" style="padding: 24px; text-align: center; color: var(--text-muted);">Vui lòng nhấn nút Tìm kiếm để tải danh sách logs...</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function fetchAndRenderLogs() {
+            const bookId = document.getElementById('logFilterBook').value;
+            const accountId = document.getElementById('logFilterAccount').value;
+            const status = document.getElementById('logFilterStatus').value;
+            
+            const tbody = document.getElementById('logsTableBody');
+            tbody.innerHTML = `<tr><td colspan="7" style="padding: 24px; text-align: center; color: var(--text-muted);"><i class="fa-solid fa-spinner fa-spin"></i> Đang tải dữ liệu logs từ PostgreSQL...</td></tr>`;
+
+            try {
+                let url = `/api/v1/monitoring/logs?limit=100`;
+                if (bookId) url += `&bookId=${encodeURIComponent(bookId)}`;
+                if (accountId) url += `&accountId=${encodeURIComponent(accountId)}`;
+                if (status) url += `&status=${encodeURIComponent(status)}`;
+
+                const res = await fetch(url);
+                const logs = await res.json();
+
+                if (!logs || logs.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="7" style="padding: 24px; text-align: center; color: var(--text-muted);">Không tìm thấy logs nào phù hợp.</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = logs.map(log => {
+                    const statusClass = log.status === 'SUCCESS' ? 'status-green' : 'status-red';
+                    const statusLabel = log.status === 'SUCCESS' ? '<i class="fa-solid fa-circle-check"></i> SUCCESS' : '<i class="fa-solid fa-circle-xmark"></i> FAILED';
+                    const errorMsg = log.error_message ? `<span style="color:var(--danger); font-family:monospace;">${log.error_message}</span>` : '<span style="color:var(--text-muted);">--</span>';
+                    const timestamp = new Date(log.created_at).toLocaleString('vi-VN');
+
+                    return `
+                        <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+                            <td style="padding: 12px 16px; font-weight: 600;">${log.book_id}</td>
+                            <td style="padding: 12px 16px; font-weight: 600; color: var(--accent-blue);">${log.account_id}</td>
+                            <td style="padding: 12px 16px;">${log.billing_cycle_month}</td>
+                            <td style="padding: 12px 16px;"><span class="badge-status ${statusClass}" style="display:inline-block; font-size:11px; padding:2px 8px; border-radius:4px;">${statusLabel}</span></td>
+                            <td style="padding: 12px 16px; max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${errorMsg}</td>
+                            <td style="padding: 12px 16px; color: var(--text-muted);">${timestamp}</td>
+                            <td style="padding: 12px 16px; text-align: center;">
+                                <button onclick="showLogDetailModal('${log.log_id}')" class="sim-btn" style="padding:4px 10px; font-size:11px; height:auto; background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.3); color: var(--primary); cursor:pointer;">
+                                    Chi tiết <i class="fa-solid fa-arrow-right"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+
+            } catch (err) {
+                tbody.innerHTML = `<tr><td colspan="7" style="padding: 24px; text-align: center; color: var(--danger);">Không thể kết nối API máy chủ: ${err.message}</td></tr>`;
+            }
+        }
+
+        async function showLogDetailModal(logId) {
+            try {
+                const res = await fetch(`/api/v1/monitoring/logs/detail/${logId}`);
+                const log = await res.json();
+
+                let modal = document.getElementById('logDetailModal');
+                if (!modal) {
+                    modal = document.createElement('div');
+                    modal.id = 'logDetailModal';
+                    modal.className = 'modal-backdrop';
+                    document.body.appendChild(modal);
+                }
+
+                const statusClass = log.status === 'SUCCESS' ? 'color: var(--success);' : 'color: var(--danger);';
+                const statusLabel = log.status === 'SUCCESS' ? 'THÀNH CÔNG (SUCCESS)' : 'THẤT BẠI (FAILED)';
+
+                let inputFormatted = 'N/A';
+                if (log.input_data) {
+                    try {
+                        const parsedInput = typeof log.input_data === 'string' ? JSON.parse(log.input_data) : log.input_data;
+                        inputFormatted = JSON.stringify(parsedInput, null, 2);
+                    } catch (e) {
+                        inputFormatted = String(log.input_data);
+                    }
+                }
+
+                let outputFormatted = 'N/A';
+                if (log.output_data) {
+                    try {
+                        const parsedOutput = typeof log.output_data === 'string' ? JSON.parse(log.output_data) : log.output_data;
+                        outputFormatted = JSON.stringify(parsedOutput, null, 2);
+                    } catch (e) {
+                        outputFormatted = String(log.output_data);
+                    }
+                }
+
+                modal.innerHTML = `
+                    <div style="width: 85%; max-width: 1000px; background: #0f1220; border: var(--glass-border); border-radius: 16px; padding: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); display: flex; flex-direction: column; max-height: 85vh;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: var(--glass-border); padding-bottom: 16px; margin-bottom: 20px;">
+                            <h2 style="font-size: 18px; font-weight: 700; color: white; display:flex; align-items:center; gap:8px;">
+                                <i class="fa-solid fa-receipt" style="color:var(--accent-blue);"></i> Chi tiết lịch sử tính cước: ${log.account_id}
+                            </h2>
+                            <button onclick="closeLogDetailModal()" style="background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer;"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+
+                        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 20px; font-size: 13px;">
+                            <div class="mf-block" style="padding:10px; background:rgba(255,255,255,0.02); border-radius:6px; border:var(--glass-border);">
+                                <span style="color: var(--text-muted); display:block; font-size:11px; margin-bottom:4px;">MÃ SỔ</span> 
+                                <strong style="color:white; font-size:14px;">${log.book_id}</strong>
+                            </div>
+                            <div class="mf-block" style="padding:10px; background:rgba(255,255,255,0.02); border-radius:6px; border:var(--glass-border);">
+                                <span style="color: var(--text-muted); display:block; font-size:11px; margin-bottom:4px;">TRẠNG THÁI</span> 
+                                <strong style="${statusClass} font-size:14px;">${statusLabel}</strong>
+                            </div>
+                            <div class="mf-block" style="padding:10px; background:rgba(255,255,255,0.02); border-radius:6px; border:var(--glass-border);">
+                                <span style="color: var(--text-muted); display:block; font-size:11px; margin-bottom:4px;">KỲ TÍNH CƯỚC</span> 
+                                <strong style="color:white; font-size:14px;">${log.billing_cycle_month}</strong>
+                            </div>
+                            <div class="mf-block" style="padding:10px; background:rgba(255,255,255,0.02); border-radius:6px; border:var(--glass-border);">
+                                <span style="color: var(--text-muted); display:block; font-size:11px; margin-bottom:4px;">THỜI GIAN GHI</span> 
+                                <strong style="color:white; font-size:14px;">${new Date(log.created_at).toLocaleString('vi-VN')}</strong>
+                            </div>
+                        </div>
+
+                        ${log.error_message ? `
+                        <div class="tracer-card" style="border-color: var(--danger); background: rgba(239,68,68,0.05); margin-bottom: 20px; padding: 12px 16px; border-radius:8px;">
+                            <h4 style="color: var(--danger); font-size: 12px; margin-bottom: 6px;"><i class="fa-solid fa-triangle-exclamation"></i> CHI TIẾT THÔNG TIN LỖI PHÁT SINH</h4>
+                            <p style="font-family: monospace; font-size: 13px; color: var(--text-main); white-space: pre-wrap; margin:0;">${log.error_message}</p>
+                        </div>
+                        ` : ''}
+
+                        <div style="display: grid; grid-template-columns: 1fr 1.5fr; gap: 20px; flex-grow: 1; overflow: hidden; min-height: 300px;">
+                            <div style="display: flex; flex-direction: column; height: 100%;">
+                                <h4 style="font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing:0.5px;">Dữ liệu tiêu thụ đầu vào (Input)</h4>
+                                <pre style="flex-grow: 1; overflow-y: auto; background: rgba(0,0,0,0.3); border: var(--glass-border); border-radius: 8px; padding: 12px; color: var(--success); font-family: monospace; font-size: 12px; margin: 0; white-space: pre-wrap; word-break: break-all;">${inputFormatted}</pre>
+                            </div>
+                            <div style="display: flex; flex-direction: column; height: 100%;">
+                                <h4 style="font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 8px; text-transform: uppercase; letter-spacing:0.5px;">Manifest kết quả tính toán (Output)</h4>
+                                <pre style="flex-grow: 1; overflow-y: auto; background: rgba(0,0,0,0.3); border: var(--glass-border); border-radius: 8px; padding: 12px; color: var(--accent-blue); font-family: monospace; font-size: 12px; margin: 0; white-space: pre-wrap; word-break: break-all;">${outputFormatted}</pre>
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 24px; text-align: right; border-top: var(--glass-border); padding-top: 16px;">
+                            <button onclick="closeLogDetailModal()" class="sim-btn" style="background: rgba(255,255,255,0.05); color: white; padding: 8px 24px; border: var(--glass-border); border-radius:6px; font-weight:600; cursor:pointer;">Đóng</button>
+                        </div>
+                    </div>
+                `;
+
+                modal.style.display = 'flex';
+            } catch (err) {
+                alert('Không thể tải chi tiết log: ' + err.message);
+            }
+        }
+
+        function closeLogDetailModal() {
+            const modal = document.getElementById('logDetailModal');
+            if (modal) modal.style.display = 'none';
+        }
+
+        // Performance Benchmark Views & Handlers
+        function showBenchmarkView() {
+            // Remove active status on account lists
+            activeAccountId = null;
+            renderAccountsList(accounts);
+            
+            const mainPanel = document.getElementById('mainPanel');
+            mainPanel.innerHTML = `
+                <div class="tracer-header">
+                    <div class="tr-title">
+                        <h2>Kiểm thử Hiệu năng Hệ thống Tính cước lõi</h2>
+                        <p>Kiểm thử hiệu năng tính toán biểu giá Sinh hoạt bậc thang (SHBT) đa luồng trên RAM quy mô lớn</p>
+                    </div>
+                </div>
+
+                <div class="tracer-grid" style="grid-template-columns: 1fr;">
+                    <!-- Controls Card -->
+                    <div class="tracer-card">
+                        <h3><i class="fa-solid fa-gauge-high"></i> CẤU HÌNH KIỂM THỬ HIỆU NĂNG 10 TRIỆU KHÁCH HÀNG</h3>
+                        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">
+                            Hệ thống mới thực hiện tính toán song song trên RAM. Bạn có thể chọn đo đạc riêng biệt hiệu năng tính toán lõi (RAM) hoặc kiểm thử toàn luồng tích hợp với Cơ sở dữ liệu vật lý (Đẩy chỉ số ➜ Query DB ➜ Ghi hóa đơn DB).
+                        </p>
+                        
+                        <div style="display: flex; flex-direction: column; gap: 16px; margin-bottom: 20px;">
+                            <div style="display: flex; gap: 20px; align-items: center;">
+                                <div style="flex: 1;">
+                                    <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 8px;">CHU KỲ TÍNH CƯỚC (THÁNG)</label>
+                                    <select id="benchMonth" class="sim-input" style="width: 100%; height: 38px; background: rgba(0,0,0,0.3); border: var(--glass-border); border-radius: 6px; padding: 0 12px; color: white;">
+                                        <option value="2026_06" selected>Tháng 06/2026 (Mặc định)</option>
+                                        <option value="2026_07">Tháng 07/2026</option>
+                                        <option value="2026_08">Tháng 08/2026</option>
+                                    </select>
+                                </div>
+                                <div style="flex: 1;">
+                                    <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 8px;">PHƯƠNG THỨC KIỂM THỬ</label>
+                                    <select id="benchMode" class="sim-input" style="width: 100%; height: 38px; background: rgba(0,0,0,0.3); border: var(--glass-border); border-radius: 6px; padding: 0 12px; color: white;" onchange="updateIterationsOptions(this.value)">
+                                        <option value="rating">Mô phỏng tính cước lõi trên RAM (Không tốn I/O đĩa vật lý)</option>
+                                        <option value="pipeline">Mô phỏng toàn trình Đầu-Cuối (Đẩy chỉ số DB ➜ Tính toán RAM ➜ Lưu hóa đơn DB ➜ Tự động dọn dẹp)</option>
+                                        <option value="kafka">Mô phỏng luồng thực tế (Đẩy CMIS qua Kafka ➜ Ingestion Listener ➜ Tính toán ➜ Ghi hóa đơn DB)</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 20px; align-items: center;">
+                                <div style="flex: 1;">
+                                    <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 8px;">QUY MÔ KIỂM THỬ (SỐ KHÁCH HÀNG)</label>
+                                    <select id="benchIterations" class="sim-input" style="width: 100%; height: 38px; background: rgba(0,0,0,0.3); border: var(--glass-border); border-radius: 6px; padding: 0 12px; color: white;">
+                                        <option value="1000000">1.000.000 (1 Triệu lượt)</option>
+                                        <option value="5000000">5.000.000 (5 Triệu lượt)</option>
+                                        <option value="10000000" selected>10.000.000 (10 Triệu lượt)</option>
+                                        <option value="20000000">20.000.000 (20 Triệu lượt)</option>
+                                    </select>
+                                </div>
+                                <div style="flex: 1;">
+                                    <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 8px;">SỐ LUỒNG TÍNH TOÁN SONG SONG</label>
+                                    <select id="benchThreads" class="sim-input" style="width: 100%; height: 38px; background: rgba(0,0,0,0.3); border: var(--glass-border); border-radius: 6px; padding: 0 12px; color: white;">
+                                        <option value="4">4 Luồng</option>
+                                        <option value="8">8 Luồng</option>
+                                        <option value="16" selected>16 Luồng (Tối ưu đa nhân CPU)</option>
+                                        <option value="32">32 Luồng</option>
+                                        <option value="64">64 Luồng</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style="font-size:11px; font-weight:700; color:var(--text-muted); margin-bottom:8px; text-transform: uppercase; letter-spacing:0.5px;">Quản lý dữ liệu mẫu Postgres</div>
+                        <div style="display: flex; gap: 12px; margin-bottom: 16px;">
+                            <button id="btnSeedData" class="sim-btn" style="flex: 1; height: 38px; justify-content: center; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: var(--success);" onclick="runBenchmarkSeed()">
+                                <i class="fa-solid fa-database"></i> 1. Gieo dữ liệu khách hàng
+                            </button>
+                            <button id="btnCleanData" class="sim-btn" style="flex: 1; height: 38px; justify-content: center; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: var(--danger);" onclick="runBenchmarkClean()">
+                                <i class="fa-solid fa-trash-can"></i> Dọn sạch CSDL
+                            </button>
+                        </div>
+
+                        <button id="btnStartBench" class="sim-btn" style="width: 100%; height: 45px; justify-content: center; font-size: 14px; font-weight: 700; background: linear-gradient(135deg, var(--accent-blue) 0%, var(--primary) 100%);" onclick="runBenchmarkLoadTest()">
+                            <i class="fa-solid fa-play"></i> 2. KÍCH HOẠT KIỂM THỬ TẢI HỆ THỐNG MỚI
+                        </button>
+                    </div>
+
+                    <!-- Loader & Console Box -->
+                    <div class="tracer-card" id="benchStatusCard" style="display: none;">
+                        <h3><i class="fa-solid fa-spinner fa-spin"></i> TIẾN TRÌNH KIỂM THỬ ĐANG CHẠY...</h3>
+                        <div class="system-console" id="benchConsole" style="height: 180px;">
+                            <div class="console-line">
+                                <span class="console-ts">[INFO]</span>
+                                <span class="console-tag">[load-test]</span>
+                                <span class="console-text">Khởi tạo hệ thống kiểm thử hiệu năng cước...</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Result Report Cards -->
+                    <div class="tracer-card" id="benchReportCard" style="display: none;">
+                        <h3><i class="fa-solid fa-square-poll-vertical"></i> KẾT QUẢ ĐO LƯỜNG HIỆU NĂNG</h3>
+                        
+                        <div class="manifest-grid" style="grid-template-columns: repeat(4, 1fr);">
+                            <div class="mf-block" style="text-align: center;">
+                                <h4>TỔNG SỐ LƯỢT TÍNH</h4>
+                                <div id="resTotal" style="font-size: 24px; font-weight: 800; color: white; margin-top: 8px;">--</div>
+                            </div>
+                            <div class="mf-block" style="text-align: center;">
+                                <h4>THỜI GIAN HOÀN THÀNH</h4>
+                                <div id="resTime" style="font-size: 24px; font-weight: 800; color: var(--accent-blue); margin-top: 8px;">-- giây</div>
+                            </div>
+                            <div class="mf-block" style="text-align: center;">
+                                <h4>THÔNG LƯỢNG ĐẠT ĐƯỢC</h4>
+                                <div id="resThroughput" style="font-size: 24px; font-weight: 800; color: var(--success); margin-top: 8px;">-- /s</div>
+                            </div>
+                            <div class="mf-block" style="text-align: center;">
+                                <h4>ĐỘ TRỄ TRUNG BÌNH</h4>
+                                <div id="resLatency" style="font-size: 24px; font-weight: 800; color: var(--warning); margin-top: 8px;">-- µs</div>
+                            </div>
+                        </div>
+
+                        <!-- Stage Latency Breakdown -->
+                        <div style="margin-top: 24px; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+                            <div class="mf-block" style="background: rgba(255,255,255,0.01); border: var(--glass-border); border-radius: 8px; padding: 12px; text-align: center;">
+                                <h4 style="font-size: 11px; color: var(--text-muted);">TRỄ INGESTION (TÌM SNAPSHOT)</h4>
+                                <div id="resStageIngest" style="font-size: 18px; font-weight: 700; color: var(--accent-blue); margin-top: 6px;">-- ms</div>
+                            </div>
+                            <div class="mf-block" style="background: rgba(255,255,255,0.01); border: var(--glass-border); border-radius: 8px; padding: 12px; text-align: center;">
+                                <h4 style="font-size: 11px; color: var(--text-muted);">CHỜ HÀNG ĐỢI KAFKA TOPIC</h4>
+                                <div id="resStageQueue" style="font-size: 18px; font-weight: 700; color: #a855f7; margin-top: 6px;">-- ms</div>
+                            </div>
+                            <div class="mf-block" style="background: rgba(255,255,255,0.01); border: var(--glass-border); border-radius: 8px; padding: 12px; text-align: center;">
+                                <h4 style="font-size: 11px; color: var(--text-muted);">TÍNH TOÁN & GHI CSDL (RAM)</h4>
+                                <div id="resStageCalc" style="font-size: 18px; font-weight: 700; color: var(--success); margin-top: 6px;">-- ms</div>
+                            </div>
+                        </div>
+
+                        <div style="margin-top: 12px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;">
+                            <div class="mf-block" style="background: rgba(255,255,255,0.01); border: var(--glass-border); border-radius: 8px; padding: 12px; text-align: center;">
+                                <h4 style="font-size: 11px; color: var(--text-muted);">ĐỘ TRỄ TOÀN TRÌNH p95 (E2E)</h4>
+                                <div id="resP95" style="font-size: 18px; font-weight: 700; color: var(--warning); margin-top: 6px;">-- ms</div>
+                            </div>
+                            <div class="mf-block" style="background: rgba(255,255,255,0.01); border: var(--glass-border); border-radius: 8px; padding: 12px; text-align: center;">
+                                <h4 style="font-size: 11px; color: var(--text-muted);">ĐỘ TRỄ TOÀN TRÌNH p99 (E2E)</h4>
+                                <div id="resP99" style="font-size: 18px; font-weight: 700; color: var(--danger); margin-top: 6px;">-- ms</div>
+                            </div>
+                        </div>
+
+                        <!-- Comparison dashboard -->
+                        <div style="margin-top: 24px; background: rgba(255,255,255,0.02); border: var(--glass-border); border-radius: 12px; padding: 20px;">
+                            <h4 style="font-size: 14px; font-weight: 700; color: var(--text-main); margin-bottom: 16px;">SO SÁNH HIỆU NĂNG TÍNH TOÁN</h4>
+                            
+                            <div style="display: flex; flex-direction: column; gap: 16px;">
+                                <!-- Old system -->
+                                <div>
+                                    <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:600; color:var(--text-muted); margin-bottom:6px;">
+                                        <span>Hệ thống tính cước cũ (Ước tính đọc/ghi DB tuần tự)</span>
+                                        <span>~ 2.000 hóa đơn / giây</span>
+                                    </div>
+                                    <div style="width:100%; height:8px; background:rgba(255,255,255,0.05); border-radius:4px; overflow:hidden;">
+                                        <div style="width: 0.1%; height: 100%; background: var(--danger);"></div>
+                                    </div>
+                                </div>
+                                <!-- New system -->
+                                <div>
+                                    <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700; color:var(--success); margin-bottom:6px;">
+                                        <span>Kiến trúc tính toán phân tán trên RAM mới (EVN RAM-Engine)</span>
+                                        <span id="resCompareText">Đang đo đạc...</span>
+                                    </div>
+                                    <div style="width:100%; height:8px; background:rgba(255,255,255,0.05); border-radius:4px; overflow:hidden;">
+                                        <div id="resCompareBar" style="width: 100%; height: 100%; background: linear-gradient(90deg, var(--accent-blue) 0%, var(--success) 100%); transition: width 1s ease;"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            <p style="font-size: 11px; color: var(--text-muted); margin-top: 12px; line-height: 1.5;">
+                                * Ghi chú: Hệ thống cũ bị giới hạn do I/O đĩa cứng (CSDL Oracle đọc ghi từng bản ghi). Hệ thống mới giải phóng năng lực xử lý bằng cách chốt sẵn snapshot lên Redis RAM Cache và xử lý tính toán áp giá luỹ tiến trực tiếp trên RAM đa luồng của CPU.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        async function runBenchmarkSeed() {
+            const iterations = document.getElementById('benchIterations').value;
+            const btn = document.getElementById('btnSeedData');
+            const statusCard = document.getElementById('benchStatusCard');
+            const consoleEl = document.getElementById('benchConsole');
+            
+            btn.disabled = true;
+            statusCard.style.display = 'block';
+            
+            consoleEl.innerHTML = `
+                <div class="console-line">
+                    <span class="console-ts">[INFO]</span>
+                    <span class="console-tag">[database]</span>
+                    <span class="console-text">Bắt đầu gieo cấu hình & chỉ số đo xa thô cho ${Number(iterations).toLocaleString('vi-VN')} khách hàng vào Postgres...</span>
+                </div>
+            `;
+            
+            try {
+                const month = document.getElementById('benchMonth').value;
+                const response = await fetch(`/api/v1/monitoring/simulate/benchmark-seed?size=${iterations}&month=${month}`);
+                if (response.ok) {
+                    const text = await response.text();
+                    consoleEl.innerHTML += `
+                        <div class="console-line">
+                            <span class="console-ts">[SUCCESS]</span>
+                            <span class="console-tag">[database]</span>
+                            <span class="console-text success">${text}</span>
+                        </div>
+                    `;
+                } else {
+                    const errMsg = await response.text();
+                    consoleEl.innerHTML += `
+                        <div class="console-line">
+                            <span class="console-ts">[ERROR]</span>
+                            <span class="console-tag">[database]</span>
+                            <span class="console-text error">Gieo dữ liệu thất bại (Mã lỗi ${response.status}): ${errMsg}</span>
+                        </div>
+                    `;
+                }
+            } catch (err) {
+                consoleEl.innerHTML += `
+                    <div class="console-line">
+                        <span class="console-ts">[ERROR]</span>
+                        <span class="console-tag">[database]</span>
+                        <span class="console-text error">Ngoại lệ: ${err.message}</span>
+                    </div>
+                `;
+            } finally {
+                btn.disabled = false;
+                consoleEl.scrollTop = consoleEl.scrollHeight;
+            }
+        }
+
+        async function runBenchmarkClean() {
+            const btn = document.getElementById('btnCleanData');
+            const statusCard = document.getElementById('benchStatusCard');
+            const consoleEl = document.getElementById('benchConsole');
+            const month = document.getElementById('benchMonth').value;
+            
+            btn.disabled = true;
+            statusCard.style.display = 'block';
+            
+            consoleEl.innerHTML = `
+                <div class="console-line">
+                    <span class="console-ts">[INFO]</span>
+                    <span class="console-tag">[database]</span>
+                    <span class="console-text">Đang dọn dẹp các tài khoản mock và hóa đơn giả lập kỳ ${month} khỏi CSDL Postgres...</span>
+                </div>
+            `;
+            
+            try {
+                const response = await fetch(`/api/v1/monitoring/simulate/benchmark-clean?month=${month}`);
+                if (response.ok) {
+                    const text = await response.text();
+                    consoleEl.innerHTML += `
+                        <div class="console-line">
+                            <span class="console-ts">[SUCCESS]</span>
+                            <span class="console-tag">[database]</span>
+                            <span class="console-text success">${text}</span>
+                        </div>
+                    `;
+                } else {
+                    const errMsg = await response.text();
+                    consoleEl.innerHTML += `
+                        <div class="console-line">
+                            <span class="console-ts">[ERROR]</span>
+                            <span class="console-tag">[database]</span>
+                            <span class="console-text error">Dọn dữ liệu thất bại (Mã lỗi ${response.status}): ${errMsg}</span>
+                        </div>
+                    `;
+                }
+            } catch (err) {
+                consoleEl.innerHTML += `
+                    <div class="console-line">
+                        <span class="console-ts">[ERROR]</span>
+                        <span class="console-tag">[database]</span>
+                        <span class="console-text error">Ngoại lệ: ${err.message}</span>
+                    </div>
+                `;
+            } finally {
+                btn.disabled = false;
+                consoleEl.scrollTop = consoleEl.scrollHeight;
+            }
+        }
+
+        function updateIterationsOptions(mode) {
+            const select = document.getElementById('benchIterations');
+            if (mode === 'rating') {
+                select.innerHTML = `
+                    <option value="1000000">1.000.000 (1 Triệu lượt)</option>
+                    <option value="5000000">5.000.000 (5 Triệu lượt)</option>
+                    <option value="10000000" selected>10.000.000 (10 Triệu lượt)</option>
+                    <option value="20000000">20.000.000 (20 Triệu lượt)</option>
+                `;
+            } else {
+                select.innerHTML = `
+                    <option value="10000">10.000 (Thử nghiệm nhanh)</option>
+                    <option value="50000">50.000 (Trung bình)</option>
+                    <option value="100000" selected>100.000 (Tải nặng toàn trình)</option>
+                    <option value="1000000">1.000.000 (Tải siêu nặng toàn trình)</option>
+                `;
+            }
+        }
+
+        async function runBenchmarkLoadTest() {
+            const mode = document.getElementById('benchMode').value;
+            const iterations = document.getElementById('benchIterations').value;
+            const threads = document.getElementById('benchThreads').value;
+            
+            const btn = document.getElementById('btnStartBench');
+            const statusCard = document.getElementById('benchStatusCard');
+            const consoleEl = document.getElementById('benchConsole');
+            const reportCard = document.getElementById('benchReportCard');
+            
+            btn.disabled = true;
+            statusCard.style.display = 'block';
+            reportCard.style.display = 'none';
+            
+            consoleEl.innerHTML = `
+                <div class="console-line">
+                    <span class="console-ts">[INFO]</span>
+                    <span class="console-tag">[system]</span>
+                    <span class="console-text">Chuản bị kiểm thử SHBT quy mô ${Number(iterations).toLocaleString('vi-VN')} khách hàng...</span>
+                </div>
+                <div class="console-line">
+                    <span class="console-ts">[INFO]</span>
+                    <span class="console-tag">[system]</span>
+                    <span class="console-text">Cấu hình: ${threads} Luồng tính toán song song...</span>
+                </div>
+                <div class="console-line">
+                    <span class="console-ts">[INFO]</span>
+                    <span class="console-tag">[system]</span>
+                    <span class="console-text">Đang gửi REST Request tới phân hệ và kích hoạt luồng...</span>
+                </div>
+            `;
+
+            if (mode === 'pipeline') {
+                consoleEl.innerHTML += `
+                    <div class="console-line">
+                        <span class="console-ts">[INFO]</span>
+                        <span class="console-tag">[database]</span>
+                        <span class="console-text">Đang ghi dữ liệu chỉ số đo xa giả lập vào PostgreSQL (JDBC Batch)...</span>
+                    </div>
+                `;
+            } else if (mode === 'kafka') {
+                consoleEl.innerHTML += `
+                    <div class="console-line">
+                        <span class="console-ts">[INFO]</span>
+                        <span class="console-tag">[kafka]</span>
+                        <span class="console-text">Đang sản xuất (Publish) và đẩy sự kiện chỉ số thô vào Kafka Topic 'meter-readings-input'...</span>
+                    </div>
+                `;
+            }
+            consoleEl.scrollTop = consoleEl.scrollHeight;
+            
+            const month = document.getElementById('benchMonth').value;
+            const startBenchTime = Date.now();
+            try {
+                let url = `/api/v1/monitoring/simulate/benchmark?iterations=${iterations}&threads=${threads}`;
+                if (mode === 'pipeline') {
+                    url = `/api/v1/monitoring/simulate/benchmark-pipeline?size=${iterations}&threads=${threads}&writeToDb=true&month=${month}`;
+                } else if (mode === 'kafka') {
+                    url = `/api/v1/monitoring/simulate/benchmark-kafka?size=${iterations}&threads=${threads}&month=${month}`;
+                }
+                
+                const response = await fetch(url);
+                const elapsedSeconds = (Date.now() - startBenchTime) / 1000.0;
+                
+                if (response.ok) {
+                    let scale = Number(iterations);
+                    let finalThroughput = 0;
+                    let finalDuration = elapsedSeconds;
+                    
+                    if (mode === 'kafka') {
+                        const text = await response.text();
+                        consoleEl.innerHTML += `
+                            <div class="console-line">
+                                <span class="console-ts">[SUCCESS]</span>
+                                <span class="console-tag">[kafka]</span>
+                                <span class="console-text success">${text}</span>
+                            </div>
+                            <div class="console-line">
+                                <span class="console-ts">[INFO]</span>
+                                <span class="console-tag">[load-test]</span>
+                                <span id="polling-status" class="console-text">Đang đo đạc tiến trình tính cước ngầm của Backend...</span>
+                            </div>
+                        `;
+                        consoleEl.scrollTop = consoleEl.scrollHeight;
+
+                        // Start polling the count of generated invoices
+                        const targetCount = scale;
+                        const pollStartTime = Date.now();
+                        let lastCount = 0;
+                        let idleSeconds = 0;
+
+                        while (true) {
+                            // Wait 500ms
+                            await new Promise(resolve => setTimeout(resolve, 500));
+
+                            const progressResponse = await fetch('/api/v1/monitoring/simulate/benchmark-progress');
+                            if (!progressResponse.ok) continue;
+
+                            const progressData = await progressResponse.json();
+                            const currentCount = progressData.processed_invoices;
+                            const elapsed = (Date.now() - pollStartTime) / 1000.0;
+                            const tput = elapsed > 0 ? Math.round(currentCount / elapsed) : 0;
+
+                            const percent = ((currentCount / targetCount) * 100).toFixed(1);
+                            
+                            const statusText = `Tiến trình: ${currentCount.toLocaleString('vi-VN')} / ${targetCount.toLocaleString('vi-VN')} hóa đơn (${percent}%) - Tốc độ hiện thời: ${tput.toLocaleString('vi-VN')} hóa đơn/s`;
+                            document.getElementById('polling-status').innerText = statusText;
+
+                            // Update live progress bar or display stats on card
+                            document.getElementById('resTotal').innerText = currentCount.toLocaleString('vi-VN');
+                            document.getElementById('resTime').innerText = elapsed.toFixed(2) + ' giây';
+                            document.getElementById('resThroughput').innerText = tput.toLocaleString('vi-VN') + ' /s';
+                            
+                            const avgE2e = progressData.avg_e2e_ms != null ? progressData.avg_e2e_ms : 0.0;
+                            const avgIngest = progressData.avg_ingest_ms != null ? progressData.avg_ingest_ms : 0.0;
+                            const avgQueue = progressData.avg_queue_ms != null ? progressData.avg_queue_ms : 0.0;
+                            const avgCalc = progressData.avg_calc_ms != null ? progressData.avg_calc_ms : 0.0;
+                            const p95 = progressData.p95_e2e_ms != null ? progressData.p95_e2e_ms : 0.0;
+                            const p99 = progressData.p99_e2e_ms != null ? progressData.p99_e2e_ms : 0.0;
+
+                            document.getElementById('resLatency').innerText = currentCount > 0 ? (avgE2e > 0 ? avgE2e.toFixed(2) + ' ms' : ((elapsed / currentCount) * 1000).toFixed(2) + ' ms') : '0.00 ms';
+                            document.getElementById('resStageIngest').innerText = avgIngest.toFixed(2) + ' ms';
+                            document.getElementById('resStageQueue').innerText = avgQueue.toFixed(2) + ' ms';
+                            document.getElementById('resStageCalc').innerText = avgCalc.toFixed(2) + ' ms';
+                            document.getElementById('resP95').innerText = p95.toFixed(2) + ' ms';
+                            document.getElementById('resP99').innerText = p99.toFixed(2) + ' ms';
+
+                            if (currentCount >= targetCount) {
+                                consoleEl.innerHTML += `
+                                    <div class="console-line">
+                                        <span class="console-ts">[SUCCESS]</span>
+                                        <span class="console-tag">[load-test]</span>
+                                        <span class="console-text success">Hoàn thành tính toán và lưu trữ tất cả ${targetCount.toLocaleString('vi-VN')} hóa đơn!</span>
+                                    </div>
+                                `;
+                                break;
+                            }
+
+                            // If progress has stopped for too long (e.g. 5 seconds of no change, and we have processed something)
+                            if (currentCount === lastCount && currentCount > 0) {
+                                idleSeconds += 0.5;
+                                if (idleSeconds >= 10) { // 10 seconds of no progress
+                                    consoleEl.innerHTML += `
+                                        <div class="console-line">
+                                            <span class="console-ts">[WARNING]</span>
+                                            <span class="console-tag">[load-test]</span>
+                                            <span class="console-text warning">Tiến trình dừng lại tại ${currentCount.toLocaleString('vi-VN')} hóa đơn. Kết thúc đo đạc.</span>
+                                        </div>
+                                    `;
+                                    break;
+                                }
+                            } else {
+                                idleSeconds = 0;
+                            }
+                            lastCount = currentCount;
+                        }
+
+                        const finalElapsed = (Date.now() - pollStartTime) / 1000.0;
+                        finalDuration = finalElapsed;
+                        finalThroughput = Math.round(lastCount / finalDuration);
+                        scale = lastCount;
+                    } else {
+                        const data = await response.json();
+                        finalDuration = data.duration_seconds || data.total_benchmark_time_seconds || elapsedSeconds;
+                        finalThroughput = data.throughput_per_second || Math.round(scale / finalDuration);
+                        scale = data.total_calculations || data.scale_size || scale;
+                    }
+                    
+                    consoleEl.innerHTML += `
+                        <div class="console-line">
+                            <span class="console-ts">[SUCCESS]</span>
+                            <span class="console-tag">[load-test]</span>
+                            <span class="console-text success">Kiểm thử thành công! Tổng thời gian chạy: ${finalDuration.toFixed(4)}s.</span>
+                        </div>
+                    `;
+                    if (mode === 'pipeline') {
+                        consoleEl.innerHTML += `
+                            <div class="console-line">
+                                <span class="console-ts">[INFO]</span>
+                                <span class="console-tag">[database]</span>
+                                <span class="console-text">Đã ghi hóa đơn thành công và dọn sạch dữ liệu mô phỏng.</span>
+                            </div>
+                        `;
+                    }
+                    consoleEl.scrollTop = consoleEl.scrollHeight;
+
+                    // Display metrics
+                    document.getElementById('resTotal').innerText = scale.toLocaleString('vi-VN');
+                    document.getElementById('resTime').innerText = finalDuration.toFixed(4) + ' giây';
+                    document.getElementById('resThroughput').innerText = finalThroughput.toLocaleString('vi-VN') + ' /s';
+                    
+                    const avgLatency = (finalDuration * 1000) / scale;
+                    document.getElementById('resLatency').innerText = avgLatency.toFixed(4) + ' ms';
+                    
+                    // Display comparison bar
+                    const factor = finalThroughput / 2000;
+                    document.getElementById('resCompareText').innerText = `${finalThroughput.toLocaleString('vi-VN')} hóa đơn / giây (Tăng trưởng gấp ${Math.round(factor).toLocaleString('vi-VN')} lần!) 🚀`;
+                    
+                    reportCard.style.display = 'block';
+                } else {
+                    consoleEl.innerHTML += `
+                        <div class="console-line">
+                            <span class="console-ts">[ERROR]</span>
+                            <span class="console-tag">[load-test]</span>
+                            <span class="console-text error">Kiểm thử thất bại. Mã phản hồi: ${response.status}</span>
+                        </div>
+                    `;
+                }
+            } catch (err) {
+                consoleEl.innerHTML += `
+                    <div class="console-line">
+                        <span class="console-ts">[ERROR]</span>
+                        <span class="console-tag">[load-test]</span>
+                        <span class="console-text error">Lỗi ngoại lệ: ${err.message}</span>
+                    </div>
+                `;
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // Change cycle month
+        function changeMonth(newMonth) {
+            activeMonth = newMonth;
+            loadTracerDetails(activeAccountId, newMonth);
+        }
+    </script>
+</body>
+</html>

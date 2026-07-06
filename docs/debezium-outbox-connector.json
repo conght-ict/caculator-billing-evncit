@@ -1,0 +1,27 @@
+{
+  "name": "billing-outbox-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "tasks.max": "1",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "postgres",
+    "database.password": "postgres",
+    "database.dbname": "billing_db",
+    "topic.prefix": "dbserver1",
+    "database.server.name": "dbserver1",
+    "table.include.list": "public.outbox_event",
+    "plugin.name": "pgoutput",
+    
+    "tombstones.on.delete": "false",
+    
+    "transforms": "outbox",
+    "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+    "transforms.outbox.route.by.field": "aggregate_type",
+    "transforms.outbox.table.field.event.id": "event_id",
+    "transforms.outbox.table.field.event.key": "aggregate_id",
+    "transforms.outbox.table.field.event.type": "event_type",
+    "transforms.outbox.table.field.event.payload": "payload",
+    "transforms.outbox.route.topic.replacement": "invoice-events"
+  }
+}

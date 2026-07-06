@@ -1,0 +1,10 @@
+com/evn/billing/snapshot/SnapshotGeneratorApplication.class
+com/evn/billing/snapshot/repository/AccountRepository.class
+com/evn/billing/snapshot/repository/MeterRelationRepository.class
+com/evn/billing/snapshot/repository/BillingAccountSnapshotRepository.class
+com/evn/billing/snapshot/repository/TariffDetailRepository.class
+com/evn/billing/snapshot/controller/SnapshotController.class
+com/evn/billing/snapshot/repository/MeterPointRepository.class
+com/evn/billing/snapshot/config/RedisConfig.class
+com/evn/billing/snapshot/service/SnapshotGeneratorService.class
+com/evn/billing/snapshot/repository/TariffRepository.class
