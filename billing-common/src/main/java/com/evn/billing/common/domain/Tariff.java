@@ -1,10 +1,9 @@
 package com.evn.billing.common.domain;
 
-import jakarta.persistence.Column;
-import jakarta.persistence.Entity;
-import jakarta.persistence.Id;
-import jakarta.persistence.Table;
+import jakarta.persistence.*;
 import lombok.Data;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "tariff")
@@ -19,5 +18,17 @@ public class Tariff {
     private String name;
 
     @Column(name = "type", length = 20, nullable = false)
-    private String type; // STEPPING, FLAT
+    private String type; // STEPPING, FLAT, TOU
+
+    @Column(name = "effective_date", nullable = false)
+    private LocalDate effectiveDate;
+
+    @Column(name = "expiry_date")
+    private LocalDate expiryDate;
+
+    @Column(name = "issued_by", length = 300)
+    private String issuedBy;
+
+    @Column(name = "created_at", nullable = false, updatable = false)
+    private LocalDateTime createdAt = LocalDateTime.now();
 }

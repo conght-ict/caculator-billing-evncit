@@ -8,4 +8,5 @@ public class TariffBlock {
     private double minKwh;
     private Double maxKwh; // Can be null for the last tier
     private double unitPrice;
+    private String touPeriod; // PEAK, OFF_PEAK, NORMAL
 }

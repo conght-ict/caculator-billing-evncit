@@ -8,5 +8,5 @@ import java.util.List;
 
 @Repository
 public interface AccountBillingStatusRepository extends JpaRepository<AccountBillingStatus, AccountBillingStatusId> {
-    List<AccountBillingStatus> findByBookIdAndBillingCycleMonth(String bookId, String billingCycleMonth);
+    List<AccountBillingStatus> findByBookIdAndBillingCycleMonthAndPeriod(String bookId, String billingCycleMonth, Integer period);
 }

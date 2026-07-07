@@ -8,5 +8,5 @@ import java.util.Optional;
 
 @Repository
 public interface BillInvoiceRepository extends JpaRepository<BillInvoice, BillInvoiceId> {
-    Optional<BillInvoice> findByAccountIdAndBillingCycleMonth(String accountId, String billingCycleMonth);
+    Optional<BillInvoice> findByAccountIdAndBillingCycleMonthAndPeriod(String accountId, String billingCycleMonth, Integer period);
 }

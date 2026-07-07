@@ -8,8 +8,8 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-public class AccountBillingStatusId implements Serializable {
-    private String accountId;
+public class BookBillingScheduleId implements Serializable {
+    private String bookId;
     private String billingCycleMonth;
     private Integer period;
 }

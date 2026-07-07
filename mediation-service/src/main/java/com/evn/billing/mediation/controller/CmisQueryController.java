@@ -32,22 +32,23 @@ public class CmisQueryController {
     @GetMapping
     public ResponseEntity<?> getInvoice(
             @RequestParam String accountId,
-            @RequestParam String month) {
+            @RequestParam String month,
+            @RequestParam(defaultValue = "1") Integer period) {
         
-        Optional<BillInvoice> invoiceOpt = billInvoiceRepository.findByAccountIdAndBillingCycleMonth(accountId, month);
+        Optional<BillInvoice> invoiceOpt = billInvoiceRepository.findByAccountIdAndBillingCycleMonthAndPeriod(accountId, month, period);
         if (invoiceOpt.isPresent()) {
             return ResponseEntity.ok(invoiceOpt.get());
         }
 
         // Scenario B: Fallback On-Demand Sync Calculation
         try {
-            log.info("[FALLBACK] Invoice missing for Account: {}, Month: {}. Triggering immediate calculation...", accountId, month);
-            String calcUrl = "http://localhost:8081/api/v1/billing/calculate-immediate?accountId=" + accountId + "&month=" + month;
+            log.info("[FALLBACK] Invoice missing for Account: {}, Month: {}, Period: {}. Triggering immediate calculation...", accountId, month, period);
+            String calcUrl = "http://localhost:8081/api/v1/billing/calculate-immediate?accountId=" + accountId + "&month=" + month + "&period=" + period;
             
             ResponseEntity<String> response = restTemplate.postForEntity(calcUrl, null, String.class);
             if (response.getStatusCode().is2xxSuccessful()) {
                 // Re-fetch invoice after successful calculation
-                invoiceOpt = billInvoiceRepository.findByAccountIdAndBillingCycleMonth(accountId, month);
+                invoiceOpt = billInvoiceRepository.findByAccountIdAndBillingCycleMonthAndPeriod(accountId, month, period);
                 if (invoiceOpt.isPresent()) {
                     return ResponseEntity.ok(invoiceOpt.get());
                 }

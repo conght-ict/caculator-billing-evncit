@@ -92,254 +92,411 @@ flowchart TD
 Hệ thống được phân rã thành 6 Module Microservices/Sub-systems độc lập:
 
 ### 1. Module Thu thập & Chuẩn hóa (Mediation Sub-system)
-- **Nhiệm vụ**: Tiếp nhận dữ liệu đo đếm thô từ hệ thống AMR/AMI (đẩy theo ngày) hoặc thiết bị cầm tay Handheld (đẩy cuối tháng).
-- **Logic xử lý**: Lọc trùng (Deduplication), chuẩn hóa mốc thời gian "Từ ngày - Đến ngày".
-- **Phép tính sơ bộ**: Thực hiện kiểm tra tính toàn vẹn và tính toán sẵn sản lượng tiêu thụ trong kỳ:
-  $$Consumption = End\_Index - Start\_Index$$
+- **Nhiệm vụ**: Tiếp nhận dữ liệu đo đếm thô từ CMIS qua Kafka topic `meter-readings-input`, hoặc từ AMR/AMI và thiết bị cầm tay Handheld.
+- **Logic xử lý**: Lọc trùng (Deduplication theo Unique `meter_point_id + from_date + to_date`), xử lý Register Rollover, chuẩn hóa mốc thời gian.
+- **Phép tính sơ bộ**: Tính toán và lưu sẵn `raw_consumption` vào bảng `METER_USAGE`:
+  - Bình thường: $raw\_consumption = End\_Index - Start\_Index$
+  - Quay vòng công tơ: $raw\_consumption = (max\_register - Start\_Index) + End\_Index$
+- **Kích hoạt tính cước**: Sau khi lưu DB, Mediation kiểm tra tính đầy đủ topology (từ Redis Cache). Nếu đủ chỉ số cho toàn cây công tơ của Account, hàm `checkAndTriggerBillingWithReadings()` **đính kèm trực tiếp danh sách chỉ số vào Task tin nhắn** và đẩy vào Kafka topic `billing-execution-topic`. Worker nhận Task này **không cần SELECT lại DB** để lấy chỉ số.
+
+```java
+// Mediation Service — gửi Task kèm readings đã đính kèm sẵn
+public void checkAndTriggerBillingWithReadings(
+        String accountId, String month, List<MeterReadingDto> readings) {
+    BillingTaskDto task = new BillingTaskDto(accountId, bookId, month, readings);
+    // Partition Key = accountId → Locality Sharding (Ràng buộc III.1)
+    kafkaTemplate.send("billing-execution-topic", accountId, task);
+}
+```
 
 ### 2. Cổng kiểm soát & Xử lý thủ công (Exception & Manual Entry Portal)
 - **Nhiệm vụ**: Quản lý các điểm đo bị lỗi logic dữ liệu hoặc thiếu chỉ số cuối kỳ khi đến ngày chốt sổ.
-- **Cơ chế**: Cô lập các tài khoản lỗi vào trạng thái `PENDING_MANUAL`. Cung cấp giao diện UI/API cho nhân viên vận hành nhập chỉ số bổ sung bằng tay, phê duyệt tập trung trước khi chuyển trạng thái sang `VALIDATED` để đưa lại vào pipeline tính toán.
+- **Cơ chế**: Cô lập các tài khoản lỗi vào trạng thái `PENDING_MANUAL`. Nhân viên vận hành sửa chỉ số bằng cách **Append bản ghi Correction** (`record_type = 'CORRECTION'`) — tuyệt đối không UPDATE chỉ số thô gốc. Sau khi phê duyệt, trạng thái chuyển sang `VALIDATED` và kích hoạt lại pipeline.
 
 ### 3. Module Đóng băng dữ liệu & Caching (Snapshot Generator & Cache Sync)
-- **Nhiệm vụ**: Giải quyết triệt để bài toán thắt nút cổ chai (Bottleneck) khi truy vấn DB liên tục lúc chạy batch.
-- **Cơ chế**: Quét thông tin tĩnh (Thông tin khách hàng, cấu trúc cây công tơ phụ tải Aggregation/Netting, tỷ lệ % phân bổ giá hỗn hợp, định mức hộ dùng chung) cuốn chiếu. Gom tất cả thành một chuỗi JSONB duy nhất lưu vào bảng `BILLING_ACCOUNT_SNAPSHOT` và đồng bộ trước lên **Redis Cluster** làm Cache. Trong suốt quá trình chạy Batch, Worker ưu tiên đọc duy nhất file Snapshot từ Redis.
+- **Nhiệm vụ**: Đóng băng dữ liệu tĩnh (topology cây công tơ, biểu giá, định mức hộ) tại thời điểm chốt cước — cách ly hoàn toàn với các thay đổi tiếp theo trên CRM.
+- **Cơ chế**:
+  - **Luồng 2 (Batch)**: Batch Orchestrator sinh `BILLING_ACCOUNT_SNAPSHOT` (JSONB Self-Contained) cho toàn bộ Account trong Sổ, nạp trước lên Redis Cluster (TTL 24h).
+  - **Luồng 4 (Master Data Sync)**: Khi CMIS thay đổi dữ liệu tĩnh (biểu giá, topology), Snapshot Generator lắng nghe Kafka `cmis-masterdata-sync` và tự động thu hồi (Evict) Snapshot cũ trên Redis.
+  - Snapshot là **Read-Only** và **không có Foreign Key vật lý** tới bất kỳ bảng Master Data nào.
 
 ### 4. Bộ điều phối & Xử lý Batch phân tán (Distributed Master-Worker Cluster)
-- **Master Node (Spring Batch)**: Chịu trách nhiệm quản lý vòng đời trạng thái của Sổ. Thực hiện chia nhỏ danh sách Account cần tính cước thành các Lô dữ liệu (Chunk size = 1,000 Accounts) và gửi tín hiệu vào Kafka topic.
-- **Worker Nodes (Stateless Java Spring Kafka Clients - Virtual Threads)**: Lắng nghe sự kiện từ Kafka, lấy chỉ số đo từ `METER_USAGE` và cấu hình từ Redis Cache (nếu miss thì đọc DB), gọi qua `Core Rating Engine` để tính toán song song sử dụng luồng ảo (Virtual Threads).
+- **Master Node (Spring Batch)** — kích hoạt qua Kafka `cmis-batch-requests` từ CMIS:
+  1. Nạp trước toàn bộ Snapshot của Sổ lên Redis.
+  2. Đọc phân trang danh sách Account + chỉ số đo đếm tương ứng.
+  3. Đóng gói `BillingTaskDto` (kèm sẵn `readings[]`) và đẩy vào Kafka `billing-execution-topic`.
+- **Worker Nodes (Stateless, Virtual Threads)**: Tiêu thụ Task từ Kafka. **Worker KHÔNG thực hiện bất kỳ câu lệnh SELECT nào vào DB để đọc chỉ số** — toàn bộ chỉ số đã có sẵn trong `task.getReadings()`. Worker chỉ đọc Snapshot từ Redis (cache-aside) và thực hiện 1 thao tác Ghi duy nhất xuống DB sau khi tính toán xong.
 
 ### 5. Lõi định giá Vô trạng thái (Core Stateless Rating Engine)
 - **Nhiệm vụ**: Module viết bằng Java thuần túy (Pure Java Object), hoàn toàn Stateless, không kết nối cơ sở dữ liệu để tối ưu tốc độ CPU.
-- **Đầu vào**: Nhận vào số liệu sản lượng thực tế và cấu trúc biểu giá động trích xuất từ Snapshot JSONB.
-- **Logic**: Thực thi cách tính toán cấu hình qua DSL (Domain Specific Language) cho các loại giá: sinh hoạt bậc thang, giá sản xuất, kinh doanh, giá TOU và giá hỗn hợp composite.
+- **Đầu vào**: `task.getReadings()` (chỉ số kèm sẵn) + Snapshot JSONB từ Redis.
+- **Logic**: Thực thi cách tính toán qua DSL cho các loại giá: sinh hoạt bậc thang (Stepping), giá sản xuất/kinh doanh (Flat), giá TOU 3 pha và giá hỗn hợp composite. Hỗ trợ Proration khi đổi giá giữa kỳ.
+- **Validate Snapshot**: Trước khi tính toán, Engine kiểm tra 6 required fields của Snapshot JSONB. Nếu thiếu bất kỳ field nào → ném `MalformSnapshotException` → Worker đẩy Task vào Dead Letter Queue (DLQ).
 
 ### 6. Module Đối soát, Kiểm toán & CDC Tích hợp (Audit & Integration Sub-system)
 - **Nhiệm vụ**: Đảm bảo tính minh bạch pháp lý cao nhất cho hóa đơn và tự động tích hợp với các downstream service thông báo.
 - **Cơ chế**: 
-  - Xuất tệp giải trình `billing_manifest` dạng JSON đính kèm trực tiếp vào từng hóa đơn.
+  - Xuất tệp giải trình `billing_manifest JSONB NOT NULL` đính kèm trực tiếp vào từng hóa đơn — chứa toàn bộ công thức toán học, bậc thang, `rounding_mode`.
   - Áp dụng **Transactional Outbox Pattern**: Lưu đồng thời hóa đơn vào `bill_invoice` và thông điệp sự kiện vào `outbox_event` trong cùng một transaction.
-  - Sử dụng **Debezium CDC** quét bảng `outbox_event` đẩy sang Kafka để các dịch vụ phụ (SMS, E-Invoice...) tiêu thụ bất đồng bộ.
+  - Sử dụng **Debezium CDC** quét bảng `outbox_event` (chỉ bản ghi `status = 'PENDING'`) đẩy sang Kafka `invoice-outbound` để CMIS và các dịch vụ phụ (SMS, E-Invoice...) tiêu thụ bất đồng bộ.
 
 ---
 
 ## IV. DATA FLOW CHI TIẾT END-TO-END (TỪ CÔNG TƠ ĐẾN HÓA ĐƠN)
 
-Luồng đi của dữ liệu hệ thống trải qua 3 giai đoạn độc lập tuyệt đối:
+Hệ thống vận hành theo **4 luồng độc lập**, tương ứng với 4 kịch bản nghiệp vụ:
+
+### Kafka Topics Catalog
+
+| Topic | Chiều | Mô tả |
+|:---|:---:|:---|
+| `meter-readings-input` | CMIS → Mediation | Chỉ số đo đếm thô từ AMR/AMI/Handheld |
+| `cmis-batch-requests` | CMIS → Orchestrator | Lệnh chốt cước hàng loạt theo Mã Sổ |
+| `cmis-masterdata-sync` | CMIS → Snapshot Gen | Thay đổi dữ liệu tĩnh (biểu giá, topology, hợp đồng) |
+| `billing-execution-topic` | Orchestrator/Mediation → Worker | Task tính cước (kèm sẵn `readings[]`) |
+| `invoice-outbound` | Debezium CDC → CMIS/Downstream | Hóa đơn đã tính xong, sự kiện SMS/E-Invoice |
+
+---
+
+### Luồng 1: Tính Cước Cuốn Chiếu Tự Động (Kafka Ingest)
+
+Kịch bản: CMIS đẩy chỉ số AMR/AMI tự động hàng ngày.
+
+1. CMIS đẩy chỉ số qua Kafka `meter-readings-input`. Mediation Service (`CmisIngestionListener`) nhận batch, kiểm duyệt và **bulk INSERT** vào `METER_USAGE` để lưu lịch sử.
+2. Mediation kiểm tra tính đầy đủ topology từ Redis Cache. Nếu cây công tơ của Account đã có đủ chỉ số trong kỳ → gọi `checkAndTriggerBillingWithReadings()`: đính kèm `readings[]` vào `BillingTaskDto` và push vào Kafka `billing-execution-topic` với **Partition Key = Account_ID**.
+3. Billing Worker nhận Task. **Chỉ số có sẵn trong `task.getReadings()` — Worker KHÔNG thực hiện SELECT vào METER_USAGE.** Worker đọc Snapshot từ Redis (cache-aside), tính toán Rating Engine trên RAM, ghi UPSERT `bill_invoice` + `outbox_event` trong 1 transaction.
+
+### Luồng 2: Chốt Sổ Hàng Loạt (Spring Batch)
+
+Kịch bản: CMIS gửi lệnh chốt sổ theo Mã Sổ vào cuối tháng.
+
+1. CMIS đẩy `BatchTriggerEvent` vào Kafka `cmis-batch-requests`. Batch Orchestrator nhận, khởi chạy Spring Batch Job với `book_id` và `billing_cycle_month`.
+2. **Freeze & Hydrate**: Orchestrator sinh `BILLING_ACCOUNT_SNAPSHOT` (JSONB Self-Contained) cho toàn bộ Account trong Sổ, nạp trước lên Redis Cluster (TTL 24h).
+3. Orchestrator đọc phân trang danh sách Account + chỉ số đo đếm, đóng gói `BillingTaskDto` (kèm `readings[]`) và đẩy đồng loạt vào Kafka `billing-execution-topic` theo Chunk (Lô 1.000 Account).
+4. Worker Nodes tiêu thụ song song. Do Partition Key = Account_ID, toàn bộ dữ liệu cùng Account luôn đi về cùng 1 Worker → tránh Race Condition. **Worker xử lý khép kín trên RAM, không phát sinh I/O Read DB.**
+
+### Luồng 3: On-Demand Fallback (Đồng Bộ REST)
+
+Kịch bản: Nhân viên vừa sửa chỉ số thủ công và cần xem hóa đơn tức thì từ CMIS.
+
+1. CMIS gửi REST request đến Mediation Service. Mediation phát hiện hóa đơn chưa tồn tại → **bỏ qua hàng đợi Kafka**, gọi trực tiếp REST API `POST /calculate-immediate` trên Billing Worker.
+2. Worker nhận `BillingTaskDto` (kèm readings), tính toán hoàn toàn trên RAM (**< 10ms**), ghi hóa đơn vào DB và trả về kết quả đồng bộ.
+3. Vẫn đảm bảo tính nguyên tử: ghi đồng thời `bill_invoice`, `outbox_event`, `billing_calculation_log` trong 1 transaction.
+
+### Luồng 4: Đồng Bộ Dữ Liệu Tĩnh (CMIS Master Data Sync)
+
+Kịch bản: CMIS cập nhật biểu giá, topology cây công tơ, hoặc thông tin hợp đồng.
+
+1. CMIS đẩy `MasterDataSyncEvent` vào Kafka `cmis-masterdata-sync`. Snapshot Generator lắng nghe, cập nhật các bảng dữ liệu tĩnh (`account`, `meter_point`, `tariff`, `meter_relation`).
+2. Tự động thu hồi (Evict) Snapshot cũ trên Redis: `DEL snapshot:{account_id}:{billing_cycle_month}`. Lần tính cước tiếp theo sẽ tái sinh Snapshot mới với dữ liệu đã cập nhật.
+
+---
 
 ### Giai đoạn 1: Thu thập và Kiểm duyệt dữ liệu đầu vào (Ingestion Phase)
-1. Hệ thống AMR/AMI hoặc Handheld Tool đẩy chỉ số về qua API Gateway của Mediation Service.
-2. Mediation Service kiểm tra logic chỉ số mới không được nhỏ hơn chỉ số cũ (trừ trường hợp công tơ quay vòng hoặc thay cháy thiết bị).
-3. Nếu dữ liệu thiếu hoặc sai lệch $\rightarrow$ Bản ghi ghi vào bảng `METER_USAGE` trạng thái `PENDING_MANUAL`, đồng thời bắn tín hiệu sang giao diện Exception Portal. Người dùng nhập tay sửa chỉ số $\rightarrow$ API cập nhật lại trạng thái thành `VALIDATED`.
-4. Nếu dữ liệu chuẩn xác $\rightarrow$ Tính toán sẵn sản lượng ($Cuối\ kỳ - Đầu\ kỳ$), ghi vào bảng `METER_USAGE` với trạng thái `VALIDATED`.
+1. CMIS/AMR/AMI hoặc Handheld Tool đẩy chỉ số về qua Kafka `meter-readings-input` hoặc API Gateway của Mediation Service.
+2. Mediation kiểm tra:
+   - Ràng buộc thời gian: `to_date > from_date`
+   - Ràng buộc chỉ số: `end_index >= start_index` (hoặc kích hoạt Register Rollover nếu `end_index < start_index` và thỏa mãn `max_register_value`)
+   - Deduplication: UNIQUE `(meter_point_id, from_date, to_date)` → reject trùng time-range
+3. Nếu dữ liệu thiếu hoặc sai lệch → Ghi vào `METER_USAGE` trạng thái `PENDING_MANUAL`, bắn tín hiệu sang Exception Portal. Nhân viên sửa bằng cách **Append bản ghi Correction** (`record_type = 'CORRECTION'`) — tuyệt đối không UPDATE chỉ số gốc.
+4. Nếu dữ liệu chuẩn xác → Tính `raw_consumption`, ghi vào `METER_USAGE` trạng thái `VALIDATED`.
 
 ### Giai đoạn 2: Đóng băng Dữ liệu tĩnh cấu hình (Freeze & Hydrate Phase)
-1. Đến ngày chốt sổ theo lịch (Billing Cycle Trigger), Batch Master phát lệnh đóng băng cho toàn bộ các Account thuộc `Book_ID` đó.
-2. Hệ thống trích xuất thông tin cây quan hệ điểm đo phụ tải, mã biểu giá áp dụng, định mức hộ dùng chung tại đúng thời điểm đó, đóng gói thành cấu trúc JSONB và lưu vào bảng `BILLING_ACCOUNT_SNAPSHOT` với phiên bản tính toán mặc định `calculation_version = 1`. Đồng thời lưu bản ghi này vào Redis Cache với thời hạn lưu trữ (TTL) 24h.
+1. Batch Master (kích hoạt từ Kafka `cmis-batch-requests`) phát lệnh sinh Snapshot cho toàn bộ Account thuộc `Book_ID`.
+2. Hệ thống trích xuất topology, biểu giá (`GetTariffAt(billing_date)`), định mức, đóng gói thành JSONB Self-Contained và lưu vào `BILLING_ACCOUNT_SNAPSHOT` (`calculation_version = 1`, có `effective_sync_date`). Đồng thời nạp vào Redis Cache (TTL 24h).
+3. **Snapshot không có Foreign Key vật lý** tới bất kỳ bảng Master Data nào — cách ly hoàn toàn với mọi thay đổi CRM sau thời điểm chốt.
 
 ### Giai đoạn 3: Tính toán cước Batch phân tán (Execution Phase)
-1. Batch Master chia tách danh sách Account cần tính cước theo các Chunk (Lô 1,000 Account) và gửi message vào Kafka topic `billing-execution-topic` với Key = `Account_ID`.
-2. Các Worker Pods tiêu thụ tin nhắn đồng thời từ Kafka Partition. Do Key là `Account_ID`, toàn bộ dữ liệu của một hộ gia đình hoặc một cụm phụ tải có quan hệ trừ phụ phức tạp luôn đi về cùng một Worker duy nhất, tránh hoàn toàn lỗi Race Condition (Xung đột ghi).
-3. Worker thực hiện truy vấn nhanh local partition của bảng `METER_USAGE` để lấy dữ liệu chỉ số.
-4. **Kiểm tra Cache (Cache-aside)**: Worker tìm kiếm Snapshot trong Redis Cluster:
-   - *Nếu Cache Hit*: Lấy trực tiếp dữ liệu Snapshot JSONB từ Redis.
-   - *Nếu Cache Miss*: Truy vấn bảng `BILLING_ACCOUNT_SNAPSHOT` trong DB, sau đó ghi cập nhật ngược lại vào Redis.
-5. Worker truyền dữ liệu vào `Core Rating Engine` để thực thi tính cước bậc thang hoặc giá hỗn hợp.
-6. Engine trả về kết quả tài chính $\rightarrow$ Worker thực hiện áp thuế VAT, sinh mã kiểm soát chống trùng lặp `idempotency_key = account_id + billing_cycle_month + calculation_version`.
-7. **Ghi dữ liệu nguyên tử (Transactional Outbox)**: Worker thực thi lệnh ghi đồng thời theo lô xuống bảng `bill_invoice` và bảng sự kiện `outbox_event` trong cùng một Database Transaction.
+1. Batch Master đóng gói `BillingTaskDto` (kèm sẵn `readings[]`) và đẩy vào Kafka `billing-execution-topic` với **Partition Key = Account_ID** (Ràng buộc Locality Sharding).
+2. Worker Pods tiêu thụ đồng thời từ Kafka. Do Partition Key = Account_ID, mọi dữ liệu của 1 cụm phụ tải luôn về cùng 1 Worker → loại bỏ Race Condition.
+3. **Worker nhận chỉ số từ `task.getReadings()` — không SELECT METER_USAGE.** Cơ chế Backpressure (`max.poll.records = 50`, Pause/Resume khi buffer > 500): ngăn OOM.
+4. **Cache-aside Snapshot**: Worker đọc Snapshot từ Redis. Cache Miss → đọc DB và ghi ngược vào Redis.
+5. **Validate Snapshot**: Kiểm tra 6 required fields (`account_id`, `book_id`, `norms_factor`, `effective_sync_date`, `meter_topology`, `tariffs`). Malform → DLQ.
+6. Worker gọi `Core Rating Engine` tính cước bậc thang / Netting / Proration trên RAM.
+7. Engine trả kết quả → Worker tính VAT, sinh `idempotency_key = account_id + billing_cycle_month + calculation_version`.
+8. **Ghi nguyên tử (Transactional Outbox)**: UPSERT `bill_invoice` (ON CONFLICT idempotency_key) + INSERT `outbox_event` trong cùng 1 DB Transaction.
 
 ### Sơ đồ tuần tự luồng dữ liệu (Sequence Flow)
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Ops as Vận hành viên (UI/Exception Portal)
-    participant AMI as AMI/AMR / Handheld
+    actor Ops as Vận hành viên (Exception Portal)
+    participant CMIS as CMIS System
     participant Med as Mediation Service
-    participant DB as TiDB / Citus Database
+    participant DB as PostgreSQL / TiDB
     participant Redis as Redis Cache
-    participant Master as Batch Master (Spring Batch)
-    participant Kafka as Kafka Queue
-    participant Worker as Worker Nodes (Spring Kafka)
+    participant Master as Batch Orchestrator
+    participant Kafka as Apache Kafka
+    participant Worker as Billing Worker
     participant Engine as Core Rating Engine
+    participant DLQ as Dead Letter Queue
 
-    %% Giai đoạn 1: Ingestion
-    rect rgb(240, 248, 255)
-        note right of AMI: Giai đoạn 1: Thu thập & Kiểm duyệt (Ingestion)
-        AMI->>Med: Gửi chỉ số đo đếm
+    %% =======================================================
+    %% Luồng 1: Tính Cước Cuốn Chiếu (Kafka Ingest)
+    %% =======================================================
+    rect rgb(230, 244, 255)
+        note right of CMIS: Luồng 1: Tính Cước Cuốn Chiếu (AMR/AMI)
+        CMIS->>Kafka: Push chỉ số [meter-readings-input] (Key=Account_ID)
+        Kafka->>Med: CmisIngestionListener nhận batch
+        Med->>DB: Bulk INSERT meter_usage (record_type=ORIGINAL)
+        Note over Med,DB: [I.1] Append-Only | [I.2] CHECK date | [I.3] UNIQUE(point,from,to)
         alt Dữ liệu sai/thiếu
-            Med->>DB: Lưu METER_USAGE (PENDING_MANUAL)
-            Ops->>Med: Nhập tay sửa & phê duyệt
-            Med->>DB: Cập nhật METER_USAGE (VALIDATED)
+            Med->>DB: INSERT meter_usage (PENDING_MANUAL)
+            Med->>Ops: Bắn cảnh báo Exception Portal
+            Ops->>Med: Append Correction record (record_type=CORRECTION)
+            Med->>DB: INSERT meter_usage correction (CORRECTION)
+            Med->>DB: UPDATE status → VALIDATED
         else Dữ liệu hợp lệ
-            Med->>DB: Lưu METER_USAGE (VALIDATED)
+            Med->>DB: INSERT meter_usage (VALIDATED, raw_consumption computed)
+        end
+        Med->>Redis: Kiểm tra topology đầy đủ?
+        alt Đủ chỉ số toàn cây công tơ
+            Med->>Kafka: Push BillingTaskDto [billing-execution-topic]\n(Key=Account_ID, kèm readings[] đính kèm)
         end
     end
 
-    %% Giai đoạn 2: Freeze & Hydrate
-    rect rgb(255, 250, 240)
-        note right of Master: Giai đoạn 2: Đóng băng cấu hình (Freeze & Hydrate)
-        Master->>DB: Quét dữ liệu cấu hình tĩnh
-        Master->>DB: Sinh BILLING_ACCOUNT_SNAPSHOT (calculation_version=1)
-        Master->>Redis: Lưu Snapshot JSONB vào Cache (TTL = 24h)
+    %% =======================================================
+    %% Luồng 2: Chốt Sổ Hàng Loạt (Spring Batch)
+    %% =======================================================
+    rect rgb(255, 248, 230)
+        note right of CMIS: Luồng 2: Chốt Sổ Hàng Loạt (Batch)
+        CMIS->>Kafka: Push BatchTriggerEvent [cmis-batch-requests]
+        Kafka->>Master: Nhận lệnh chốt sổ (book_id, month)
+        Master->>DB: Quét và sinh BILLING_ACCOUNT_SNAPSHOT (JSONB Self-Contained)
+        Note over Master,DB: [II.1] Không FK | [II.2] 6 required fields | effective_sync_date
+        Master->>Redis: Nạp trước Snapshot toàn sổ (TTL=24h)
+        Master->>DB: Đọc phân trang Account + chỉ số (METER_USAGE VALIDATED)
+        Master->>Kafka: Push Chunk BillingTaskDto [billing-execution-topic]\n(Key=Account_ID, kèm readings[] đính kèm sẵn)
+        Note over Master,Kafka: [III.1] Partition Key = Account_ID → Locality Sharding
     end
 
-    %% Giai đoạn 3: Execution
-    rect rgb(244, 255, 244)
-        note right of Master: Giai đoạn 3: Tính cước Batch phân tán (Execution)
-        Master->>Kafka: Đẩy Chunk 1,000 Accounts (Key = Account_ID)
-        Kafka->>Worker: Tiêu thụ Message
-        Worker->>DB: Lấy dữ liệu Usage (METER_USAGE)
-        
-        alt Đọc từ Redis Cache (Cache Hit)
-            Worker->>Redis: Get Snapshot
-            Redis-->>Worker: Trả về Snapshot JSONB
-        else Đọc từ Database (Cache Miss)
-            Worker->>Redis: Get Snapshot (Không có)
-            Worker->>DB: Truy vấn BILLING_ACCOUNT_SNAPSHOT
-            DB-->>Worker: Trả về Snapshot JSONB
-            Worker->>Redis: Set Snapshot (Lưu lại vào cache)
+    %% =======================================================
+    %% Worker xử lý (dùng chung cho Luồng 1 và 2)
+    %% =======================================================
+    rect rgb(230, 255, 238)
+        note right of Kafka: Worker xử lý (Virtual Threads)
+        Kafka->>Worker: Tiêu thụ BillingTaskDto (kèm readings[])
+        Note over Worker: [III.2] Backpressure: max.poll.records=50\nPause khi buffer>500, Resume sau khi flush
+        Note over Worker: Chỉ số có sẵn trong task.getReadings()\nKHÔNG SELECT METER_USAGE!
+        alt Cache Hit
+            Worker->>Redis: GET snapshot:{account_id}:{month}
+            Redis-->>Worker: Trả Snapshot JSONB
+        else Cache Miss
+            Worker->>Redis: GET (miss)
+            Worker->>DB: SELECT billing_account_snapshot
+            DB-->>Worker: Trả Snapshot JSONB
+            Worker->>Redis: SET Snapshot (TTL=24h)
         end
+        Worker->>Engine: Validate Snapshot (6 required fields)
+        alt Snapshot Malform
+            Engine-->>Worker: MalformSnapshotException
+            Worker->>DLQ: Push Task vào Dead Letter Queue
+        else Snapshot hợp lệ [II.2]
+            Engine->>Engine: Aggregate/Netting, Stepping, Proration
+            Engine-->>Worker: Kết quả tiền điện
+            Worker->>Worker: Tính VAT, sinh idempotency_key
+            Note over Worker,DB: [IV.1] UPSERT ON CONFLICT(idempotency_key)\n[IV.2] billing_manifest NOT NULL (có rounding_mode)
+            Worker->>DB: UPSERT bill_invoice + INSERT outbox_event\n(Single Transaction)
+        end
+    end
 
-        Worker->>Engine: Gọi tính toán (Stateless CPU-bound)
-        Engine-->>Worker: Trả về kết quả cước
-        Worker->>Worker: Tính thuế VAT & sinh Idempotency Key
-        
-        Note over Worker,DB: Ghi đồng thời hóa đơn & sự kiện Outbox (Single DB Transaction)
-        Worker->>DB: BULK INSERT/UPSERT vào bill_invoice & outbox_event
+    %% =======================================================
+    %% Luồng 3: On-Demand REST Fallback
+    %% =======================================================
+    rect rgb(255, 235, 255)
+        note right of CMIS: Luồng 3: On-Demand REST Fallback
+        CMIS->>Med: REST GET /invoice?account_id=X
+        Med->>DB: Kiểm tra hóa đơn đã tồn tại chưa?
+        alt Chưa có hóa đơn
+            Med->>Worker: REST POST /calculate-immediate (BillingTaskDto + readings)
+            Worker->>Engine: Tính toán trên RAM (<10ms)
+            Worker->>DB: UPSERT bill_invoice + outbox_event (1 transaction)
+            Worker-->>Med: Kết quả đồng bộ
+        end
+        Med-->>CMIS: Trả hóa đơn
+    end
+
+    %% =======================================================
+    %% Luồng 4: Master Data Sync
+    %% =======================================================
+    rect rgb(240, 240, 255)
+        note right of CMIS: Luồng 4: CMIS Master Data Sync
+        CMIS->>Kafka: Push MasterDataSyncEvent [cmis-masterdata-sync]
+        Kafka->>Med: Cập nhật account/meter_point/tariff
+        Med->>DB: UPDATE dữ liệu tĩnh
+        Med->>Redis: DEL snapshot:{account_id}:{month} (Evict Snapshot cũ)
     end
 ```
+
 
 ---
 
 ## V. KIẾN TRÚC DỮ LIỆU & CHI TIẾT SNAPSHOT SCHEMA (DATA LAYER)
 
-Hệ thống sử dụng cơ sở dữ liệu phân tán (Distributed SQL như TiDB hoặc cụm PostgreSQL phân mảnh Citus) để phục vụ việc ghi tốc độ cao.
+Hệ thống sử dụng PostgreSQL Cluster (Citus) hoặc TiDB để phục vụ ghi tốc độ cao, với Range Partitioning theo tháng.
 
-### 1. Cấu trúc vật lý các bảng lõi (Database Schema DDL)
+> **File SQL đầy đủ**: [`init-db/init.sql`](file:///Volumes/Code%201/caculator-billing-evncit/init-db/init.sql) — Schema v2.0 với 14 bảng, 4 nhóm ràng buộc kỹ thuật.
 
-Dưới đây là đặc tả SQL DDL chuẩn hóa phù hợp cho TiDB / PostgreSQL Cluster hỗ trợ phân vùng vật lý (Range Partition) theo tháng và tích hợp bảng sự kiện Outbox:
+### 1. Sơ đồ các nhóm bảng
+
+| Nhóm | Bảng | Mục đích | Đặc tính |
+|---|---|---|---|
+| **Master Data** | `meter_model`, `account`, `meter_point`, `meter_relation` | Dữ liệu tĩnh | ACID, shard by account_id |
+| **Metadata/Rules** | `tariff`, `tariff_detail` | Biểu giá theo thời gian | `effective_date` + `expiry_date` |
+| **Usage (Group I)** | `meter_usage` | Chỉ số công tơ | Append-Only, Partition/month |
+| **Snapshot (Group II)** | `billing_account_snapshot` | Đóng băng cấu hình | No FK, Immutable, JSONB |
+| **Output (Group IV)** | `bill_invoice` | Hóa đơn | Idempotency, Partition/month |
+| **Integration** | `outbox_event`, `billing_calculation_log`, `book_billing_run`, `account_billing_status` | CDC & Audit | Outbox, Log, Control |
+
+### 2. Các ràng buộc kỹ thuật cốt lõi
 
 ```sql
--- 1. Bảng: account (Bảng cấu hình chính)
-CREATE TABLE account (
-    account_id VARCHAR(50) PRIMARY KEY,
-    book_id VARCHAR(20) NOT NULL,
-    customer_name VARCHAR(100) NOT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'ACTIVE'
-);
-CREATE INDEX idx_account_book ON account(book_id);
+-- [I.1] Append-Only: sửa sai bằng Correction Record, không UPDATE chỉ số gốc
+-- record_type = 'ORIGINAL' | 'CORRECTION'
+-- correction_of_usage_id = soft FK tới bản ghi gốc
 
--- 2. Bảng: meter_usage (Phân vùng theo tháng - Range Partition)
-CREATE TABLE meter_usage (
-    usage_id BIGINT NOT NULL,
-    account_id VARCHAR(50) NOT NULL,
-    meter_point_id VARCHAR(50) NOT NULL,
-    billing_cycle_month VARCHAR(10) NOT NULL, -- Định dạng: YYYY_MM
-    from_date TIMESTAMP NOT NULL,
-    to_date TIMESTAMP NOT NULL,
-    start_index NUMERIC(12,2) NOT NULL,
-    end_index NUMERIC(12,2) NOT NULL,
-    consumption NUMERIC(12,2) GENERATED ALWAYS AS (end_index - start_index) STORED,
-    status VARCHAR(20) NOT NULL DEFAULT 'PENDING_MANUAL',
-    PRIMARY KEY (usage_id, billing_cycle_month)
-) PARTITION BY RANGE (billing_cycle_month);
+-- [I.2] Monotonically Increasing: những hàng nhập sai bị DB tự reject
+CONSTRAINT chk_meter_usage_date_order CHECK (to_date > from_date)
 
--- Ví dụ khai báo phân vùng cụ thể cho bảng meter_usage
-CREATE TABLE meter_usage_2026_06 PARTITION OF meter_usage FOR VALUES FROM ('2026_06') TO ('2026_07');
-CREATE TABLE meter_usage_2026_07 PARTITION OF meter_usage FOR VALUES FROM ('2026_07') TO ('2026_08');
+-- [I.2] Register Rollover: đọc max_register_value từ meter_model
+-- is_rollover = TRUE → consumption = (max_register_snapshot - start_index) + end_index
 
--- 3. Bảng: billing_account_snapshot (Đóng băng dữ liệu tĩnh)
-CREATE TABLE billing_account_snapshot (
-    snapshot_id VARCHAR(64) PRIMARY KEY, -- account_id + billing_cycle_month + calculation_version
-    account_id VARCHAR(50) NOT NULL,
-    book_id VARCHAR(20) NOT NULL,
-    billing_cycle_month VARCHAR(10) NOT NULL,
-    calculation_version INT NOT NULL DEFAULT 1,
-    config_data JSONB NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX idx_snapshot_account ON billing_account_snapshot(account_id);
+-- [I.3] Deduplication: 1 điểm đo, 1 khoảng thời gian — block ingestion trùng
+CREATE UNIQUE INDEX uq_meter_usage_no_overlap
+    ON meter_usage (meter_point_id, from_date, to_date);
 
--- 4. Bảng: bill_invoice (Phân vùng theo tháng - Range Partition)
-CREATE TABLE bill_invoice (
-    invoice_id VARCHAR(50) NOT NULL,
-    account_id VARCHAR(50) NOT NULL,
-    book_id VARCHAR(20) NOT NULL,
-    billing_cycle_month VARCHAR(10) NOT NULL, -- Định dạng: YYYY_MM
-    total_amount_before_tax NUMERIC(15,2) NOT NULL,
-    tax_amount NUMERIC(15,2) NOT NULL,
-    total_amount_after_tax NUMERIC(15,2) NOT NULL,
-    idempotency_key VARCHAR(100) NOT NULL,
-    billing_manifest JSONB NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (invoice_id, billing_cycle_month),
-    CONSTRAINT uq_idempotency_invoice UNIQUE (idempotency_key, billing_cycle_month)
-) PARTITION BY RANGE (billing_cycle_month);
+-- [II.1] Snapshot cách ly vật lý: không có REFERENCES tới bất kỳ bảng Master Data
+-- account_id VARCHAR(50) NOT NULL,  -- <— KHÔNG có REFERENCES account(account_id)
 
--- Ví dụ khai báo phân vùng cụ thể cho bảng bill_invoice
-CREATE TABLE bill_invoice_2026_06 PARTITION OF bill_invoice FOR VALUES FROM ('2026_06') TO ('2026_07');
-CREATE TABLE bill_invoice_2026_07 PARTITION OF bill_invoice FOR VALUES FROM ('2026_07') TO ('2026_08');
+-- [II.2] Self-Containment: Worker validate 6 required fields trước khi tính toán
+-- Nếu thiếu → MalformSnapshotException → Task bị đẩy vào DLQ
 
--- 5. Bảng: outbox_event (Transactional Outbox Pattern cho các dịch vụ downstream)
-CREATE TABLE outbox_event (
-    event_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    aggregate_type VARCHAR(50) NOT NULL,    -- Ví dụ: 'INVOICE'
-    aggregate_id VARCHAR(50) NOT NULL,      -- Invoice ID / Account ID
-    event_type VARCHAR(50) NOT NULL,        -- Ví dụ: 'INVOICE_CREATED'
-    payload JSONB NOT NULL,                 -- Nội dung sự kiện gửi đi (JSON)
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-CREATE INDEX idx_outbox_created ON outbox_event(created_at);
+-- [IV.1] Idempotency: UPSERT ON CONFLICT — Kafka retry an toàn, không tạo hóa đơn trùng
+INSERT INTO bill_invoice (..., idempotency_key, ...)
+ON CONFLICT (idempotency_key)
+DO UPDATE SET total_amount_after_tax = EXCLUDED.total_amount_after_tax,
+              billing_manifest = EXCLUDED.billing_manifest,
+              updated_at = NOW();
+
+-- [IV.2] Self-Explainability: billing_manifest luôn đầy đủ, không NULL
+billing_manifest JSONB NOT NULL  -- chứa: topology_calc, steps, rounding_mode, tax
 ```
 
-### 2. Cấu trúc mẫu JSON dữ liệu tĩnh đóng băng (`config_data` trong Snapshot Table)
-
-Trường dữ liệu này đóng gói toàn bộ quan hệ topology điểm đo phụ tải phức tạp và chính sách áp biểu giá của tài khoản tại kỳ tính cước:
+### 3. Cấu trúc JSONB đồng băng (`config_data` trong Snapshot) [II.2 Self-Contained]
 
 ```json
 {
-  "account_id": "ACC-EVN-123456",
+  "account_id": "KH003",
+  "book_id": "SO_01",
   "norms_factor": 3,
+  "effective_sync_date": "2026-06-30",
   "meter_topology": {
     "root_points": [
       {
-        "meter_point_id": "METER-TONG-01",
+        "meter_point_id": "METER-03-TONG",
+        "meter_serial": "SN-33300",
+        "max_register_value": 9999999.9,
         "calculation_type": "AGGREGATION",
-        "tariff_code": "TARIFF_SHBT_2026",
+        "tariff_code": "TARIFF_SHBT_2023",
         "child_points": [
           {
-            "meter_point_id": "METER-PHU-02",
+            "meter_point_id": "METER-03-PHU",
+            "meter_serial": "SN-33301",
+            "max_register_value": 99999.9,
             "calculation_type": "NETTING",
-            "tariff_code": "TARIFF_KDOANH_2026"
+            "tariff_code": "TARIFF_KDOANH_2023"
           }
         ]
       }
     ]
   },
   "tariffs": {
-    "TARIFF_SHBT_2026": {
-      "tariff_code": "TARIFF_SHBT_2026",
+    "TARIFF_SHBT_2023": {
+      "tariff_code": "TARIFF_SHBT_2023",
       "type": "STEPPING",
+      "effective_date": "2023-05-04",
+      "expiry_date": null,
       "blocks": [
-        {"step": 1, "min_kwh": 0, "max_kwh": 50, "unit_price": 1806},
-        {"step": 2, "min_kwh": 51, "max_kwh": 100, "unit_price": 1866},
-        {"step": 3, "min_kwh": 101, "max_kwh": 200, "unit_price": 2167},
-        {"step": 4, "min_kwh": 201, "max_kwh": 300, "unit_price": 2729},
-        {"step": 5, "min_kwh": 301, "max_kwh": 400, "unit_price": 3050},
-        {"step": 6, "min_kwh": 401, "max_kwh": null, "unit_price": 3157}
+        {"step": 1, "min_kwh": 0,   "max_kwh": 50,  "unit_price": 1806},
+        {"step": 2, "min_kwh": 50,  "max_kwh": 100, "unit_price": 1866},
+        {"step": 3, "min_kwh": 100, "max_kwh": 200, "unit_price": 2167},
+        {"step": 4, "min_kwh": 200, "max_kwh": 300, "unit_price": 2729},
+        {"step": 5, "min_kwh": 300, "max_kwh": 400, "unit_price": 3050},
+        {"step": 6, "min_kwh": 400, "max_kwh": null,"unit_price": 3157}
       ]
     },
-    "TARIFF_KDOANH_2026": {
-      "tariff_code": "TARIFF_KDOANH_2026",
+    "TARIFF_KDOANH_2023": {
+      "tariff_code": "TARIFF_KDOANH_2023",
       "type": "FLAT",
+      "effective_date": "2023-05-04",
+      "expiry_date": null,
       "blocks": [
         {"step": 1, "min_kwh": 0, "max_kwh": null, "unit_price": 2500}
       ]
     }
-  }
+  },
+  "proration_periods": []
 }
 ```
+
+### 4. Cấu trúc `billing_manifest` JSONB [IV.2 Self-Explainability]
+
+```json
+{
+  "invoice_id": "INV-EVN-202607-KH003",
+  "calculation_engine_version": "v2.1-stable",
+  "timestamp": "2026-07-07T00:00:00Z",
+  "snapshot_applied": "KH003_2026_07_v1",
+  "topology_calculation": {
+    "input_readings": [
+      {
+        "meter_point_id": "METER-03-TONG",
+        "calculation_type": "AGGREGATION",
+        "sub_readings": [
+          {"seq": 1, "from_date": "2026-07-01", "to_date": "2026-07-31",
+           "start_index": 2000, "end_index": 2500, "is_rollover": false, "kwh": 500}
+        ],
+        "total_kwh": 500
+      },
+      {
+        "meter_point_id": "METER-03-PHU",
+        "calculation_type": "NETTING",
+        "sub_readings": [
+          {"seq": 1, "from_date": "2026-07-01", "to_date": "2026-07-31",
+           "start_index": 500, "end_index": 600, "is_rollover": false, "kwh": 100}
+        ],
+        "total_kwh": 100
+      }
+    ],
+    "net_consumption_formula": "AGGREGATION(500) - NETTING(100) = 400 kWh",
+    "final_net_consumption": 400,
+    "norms_factor": 3
+  },
+  "proration": null,
+  "rating_breakdown": {
+    "tariff_applied": "TARIFF_SHBT_2023",
+    "tariff_effective_date": "2023-05-04",
+    "steps_executed": [
+      {"step": 1, "range_kwh": "0-150",   "kwh": 150, "unit_price": 1806, "amount": 270900,
+       "note": "Bậc 1 × norms_factor(3) = 0-150 kWh"},
+      {"step": 2, "range_kwh": "150-300", "kwh": 150, "unit_price": 1866, "amount": 279900,
+       "note": "Bậc 2 × norms_factor(3) = 150-300 kWh"},
+      {"step": 3, "range_kwh": "300-400", "kwh": 100, "unit_price": 2167, "amount": 216700,
+       "note": "Bậc 3 = 300-400 kWh"}
+    ],
+    "total_before_tax": 767500
+  },
+  "tax_calculation": {
+    "vat_rate": 0.10,
+    "tax_amount_raw": 76750,
+    "rounding_mode": "HALF_UP",
+    "tax_amount_final": 76750
+  },
+  "total_final_amount": 844250
+}
+```
+
 
 ---
 

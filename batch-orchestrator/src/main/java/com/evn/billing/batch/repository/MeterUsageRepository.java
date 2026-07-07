@@ -12,12 +12,12 @@ public interface MeterUsageRepository extends JpaRepository<MeterUsage, MeterUsa
 
     /**
      * Counts the number of meter points in a specific Book that are missing validated readings
-     * or are in PENDING_MANUAL status.
+     * or are in PENDING_MANUAL status for a given period.
      */
     @Query("SELECT COUNT(m) FROM MeterUsage m WHERE m.accountId IN " +
            "(SELECT a.accountId FROM Account a WHERE a.bookId = :bookId AND a.status = 'ACTIVE') " +
-           "AND m.billingCycleMonth = :month AND m.status = 'PENDING_MANUAL'")
-    long countPendingReadingsForBook(@Param("bookId") String bookId, @Param("month") String month);
+           "AND m.billingCycleMonth = :month AND m.period = :period AND m.status = 'PENDING_MANUAL'")
+    long countPendingReadingsForBook(@Param("bookId") String bookId, @Param("month") String month, @Param("period") Integer period);
 
-    java.util.List<MeterUsage> findByAccountIdAndBillingCycleMonthAndStatus(String accountId, String billingCycleMonth, String status);
+    java.util.List<MeterUsage> findByAccountIdAndBillingCycleMonthAndPeriodAndStatus(String accountId, String billingCycleMonth, Integer period, String status);
 }

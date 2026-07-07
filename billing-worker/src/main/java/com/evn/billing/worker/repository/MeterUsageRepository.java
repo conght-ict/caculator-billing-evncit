@@ -8,5 +8,5 @@ import java.util.List;
 
 @Repository
 public interface MeterUsageRepository extends JpaRepository<MeterUsage, MeterUsageId> {
-    List<MeterUsage> findByAccountIdAndBillingCycleMonthAndStatus(String accountId, String billingCycleMonth, String status);
+    List<MeterUsage> findByAccountIdAndBillingCycleMonthAndPeriodAndStatus(String accountId, String billingCycleMonth, Integer period, String status);
 }

@@ -16,8 +16,11 @@ public class SnapshotController {
     private SnapshotGeneratorService snapshotGeneratorService;
 
     @PostMapping("/generate")
-    public ResponseEntity<String> generateSnapshots(@RequestParam String bookId, @RequestParam String month) {
-        snapshotGeneratorService.generateSnapshotsForBook(bookId, month);
+    public ResponseEntity<String> generateSnapshots(
+            @RequestParam String bookId,
+            @RequestParam String month,
+            @RequestParam(defaultValue = "1") Integer period) {
+        snapshotGeneratorService.generateSnapshotsForBook(bookId, month, period);
         return ResponseEntity.ok("Billing configuration snapshots generated and cache synchronized.");
     }
 }

@@ -28,4 +28,7 @@ public class TariffDetail {
 
     @Column(name = "unit_price", nullable = false, precision = 12, scale = 2)
     private BigDecimal unitPrice;
+
+    @Column(name = "tou_period", length = 20)
+    private String touPeriod; // PEAK, OFF_PEAK, NORMAL
 }

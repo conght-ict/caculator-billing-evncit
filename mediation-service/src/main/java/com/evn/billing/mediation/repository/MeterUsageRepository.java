@@ -12,12 +12,12 @@ import java.util.Optional;
 @Repository
 public interface MeterUsageRepository extends JpaRepository<MeterUsage, MeterUsageId> {
 
-    List<MeterUsage> findByAccountIdAndBillingCycleMonth(String accountId, String billingCycleMonth);
+    List<MeterUsage> findByAccountIdAndBillingCycleMonthAndPeriod(String accountId, String billingCycleMonth, Integer period);
 
-    List<MeterUsage> findByAccountIdAndBillingCycleMonthAndStatus(String accountId, String billingCycleMonth, String status);
+    List<MeterUsage> findByAccountIdAndBillingCycleMonthAndPeriodAndStatus(String accountId, String billingCycleMonth, Integer period, String status);
 
-    @Query("SELECT m FROM MeterUsage m WHERE m.billingCycleMonth = :month AND m.status = 'PENDING_MANUAL'")
-    List<MeterUsage> findPendingManualByMonth(@Param("month") String month);
+    @Query("SELECT m FROM MeterUsage m WHERE m.billingCycleMonth = :month AND m.period = :period AND m.status = 'PENDING_MANUAL'")
+    List<MeterUsage> findPendingManualByMonthAndPeriod(@Param("month") String month, @Param("period") Integer period);
 
-    Optional<MeterUsage> findByAccountIdAndMeterPointIdAndBillingCycleMonth(String accountId, String meterPointId, String billingCycleMonth);
+    Optional<MeterUsage> findByAccountIdAndMeterPointIdAndBillingCycleMonthAndPeriod(String accountId, String meterPointId, String billingCycleMonth, Integer period);
 }

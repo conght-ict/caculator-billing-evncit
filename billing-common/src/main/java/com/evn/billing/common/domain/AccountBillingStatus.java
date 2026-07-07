@@ -24,11 +24,15 @@ public class AccountBillingStatus {
     @Column(name = "billing_cycle_month", length = 20)
     private String billingCycleMonth;
 
+    @Id
+    @Column(name = "period")
+    private Integer period = 1;
+
     @Column(name = "book_id", length = 50, nullable = false)
     private String bookId;
 
     @Column(name = "status", length = 20, nullable = false)
-    private String status; // SUCCESS, FAILED, CANCELLED
+    private String status = "PENDING"; // PENDING, PROCESSING, SUCCESS, FAILED, DLQ
 
     @Column(name = "invoice_id", length = 100)
     private String invoiceId;
@@ -36,6 +40,15 @@ public class AccountBillingStatus {
     @Column(name = "error_message")
     private String errorMessage;
 
-    @Column(name = "updated_at")
+    @Column(name = "retry_count", nullable = false)
+    private Integer retryCount = 0;
+
+    @Column(name = "processing_time_ms")
+    private Long processingTimeMs;
+
+    @Column(name = "worker_node", length = 100)
+    private String workerNode;
+
+    @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt = LocalDateTime.now();
 }

@@ -145,8 +145,8 @@ public class MonitoringPortalController {
     @GetMapping("/batch/runs")
     public ResponseEntity<?> getBookBillingRuns() {
         try {
-            String sql = "SELECT run_id, book_id, billing_cycle_month, status, total_accounts, processed_accounts, success_accounts, failed_accounts, updated_at " +
-                    "FROM book_billing_run ORDER BY updated_at DESC LIMIT 50";
+            String sql = "SELECT book_id, billing_cycle_month, period, status, run_status, total_accounts, processed_accounts, success_accounts, failed_accounts, updated_at " +
+                    "FROM book_billing_schedule ORDER BY updated_at DESC LIMIT 50";
             List<Map<String, Object>> runs = jdbcTemplate.queryForList(sql);
             return ResponseEntity.ok(runs);
         } catch (Exception e) {
@@ -229,7 +229,10 @@ public class MonitoringPortalController {
     }
 
     @GetMapping("/detail/{accountId}/{month}")
-    public ResponseEntity<?> getDetail(@PathVariable String accountId, @PathVariable String month) {
+    public ResponseEntity<?> getDetail(
+            @PathVariable String accountId,
+            @PathVariable String month,
+            @RequestParam(defaultValue = "1") Integer period) {
         Map<String, Object> detail = new HashMap<>();
 
         Optional<Account> accountOpt = accountRepository.findById(accountId);
@@ -238,14 +241,14 @@ public class MonitoringPortalController {
         }
         detail.put("account", accountOpt.get());
 
-        List<MeterUsage> usages = meterUsageRepository.findByAccountIdAndBillingCycleMonth(accountId, month);
+        List<MeterUsage> usages = meterUsageRepository.findByAccountIdAndBillingCycleMonthAndPeriod(accountId, month, period);
         detail.put("readings", usages);
 
-        String snapshotId = accountId + "_" + month + "_v1";
+        String snapshotId = accountId + "_" + month + "_p" + period + "_v1";
         Optional<BillingAccountSnapshot> snapshotOpt = snapshotRepository.findById(snapshotId);
         detail.put("snapshot", snapshotOpt.orElse(null));
 
-        Optional<BillInvoice> invoiceOpt = billInvoiceRepository.findByAccountIdAndBillingCycleMonth(accountId, month);
+        Optional<BillInvoice> invoiceOpt = billInvoiceRepository.findByAccountIdAndBillingCycleMonthAndPeriod(accountId, month, period);
         detail.put("invoice", invoiceOpt.orElse(null));
 
         return ResponseEntity.ok(detail);
@@ -262,9 +265,13 @@ public class MonitoringPortalController {
     }
 
     @PostMapping("/simulate/calculate")
-    public ResponseEntity<String> simulateCalculate(@RequestParam String accountId, @RequestParam String month, @RequestParam String bookId) {
+    public ResponseEntity<String> simulateCalculate(
+            @RequestParam String accountId,
+            @RequestParam String month,
+            @RequestParam(defaultValue = "1") Integer period,
+            @RequestParam String bookId) {
         try {
-            String url = "http://localhost:8081/api/v1/billing/calculate-immediate?accountId=" + accountId + "&month=" + month + "&bookId=" + bookId;
+            String url = "http://localhost:8081/api/v1/billing/calculate-immediate?accountId=" + accountId + "&month=" + month + "&period=" + period + "&bookId=" + bookId;
             return restTemplate.postForEntity(url, null, String.class);
         } catch (Exception e) {
             return ResponseEntity.status(500).body("Failed to call billing-worker service: " + e.getMessage());
@@ -276,6 +283,7 @@ public class MonitoringPortalController {
             @RequestParam String accountId,
             @RequestParam String bookId,
             @RequestParam String month,
+            @RequestParam(defaultValue = "1") Integer period,
             @RequestParam String meterPointId,
             @RequestParam double startIndex,
             @RequestParam double endIndex) {
@@ -290,16 +298,16 @@ public class MonitoringPortalController {
             }
 
             // Step 1: Chốt snapshot nếu chưa tồn tại
-            String snapshotId = accountId + "_" + month + "_v1";
+            String snapshotId = accountId + "_" + month + "_p" + period + "_v1";
             Optional<BillingAccountSnapshot> snapshotOpt = snapshotRepository.findById(snapshotId);
             if (snapshotOpt.isEmpty()) {
-                String url = "http://localhost:8082/api/v1/snapshots/generate?bookId=" + bookId + "&month=" + month;
+                String url = "http://localhost:8082/api/v1/snapshots/generate?bookId=" + bookId + "&month=" + month + "&period=" + period;
                 restTemplate.postForEntity(url, null, String.class);
             }
 
             // Step 2: Lưu chỉ số thô vào CSDL
             Optional<MeterUsage> existingOpt = meterUsageRepository
-                    .findByAccountIdAndMeterPointIdAndBillingCycleMonth(accountId, actualMeterId, month);
+                    .findByAccountIdAndMeterPointIdAndBillingCycleMonthAndPeriod(accountId, actualMeterId, month, period);
             MeterUsage usage = existingOpt.orElseGet(MeterUsage::new);
             
             if (usage.getUsageId() == null) {
@@ -308,6 +316,7 @@ public class MonitoringPortalController {
             usage.setAccountId(accountId);
             usage.setMeterPointId(actualMeterId);
             usage.setBillingCycleMonth(month);
+            usage.setPeriod(period);
             usage.setFromDate(LocalDateTime.now().minusDays(30));
             usage.setToDate(LocalDateTime.now());
             usage.setStartIndex(BigDecimal.valueOf(startIndex));
@@ -318,7 +327,7 @@ public class MonitoringPortalController {
             // Đối với KH003, tự động thêm chỉ số phụ cho METER-03-PHU
             if ("KH003".equals(accountId)) {
                 Optional<MeterUsage> childOpt = meterUsageRepository
-                        .findByAccountIdAndMeterPointIdAndBillingCycleMonth(accountId, "METER-03-PHU", month);
+                        .findByAccountIdAndMeterPointIdAndBillingCycleMonthAndPeriod(accountId, "METER-03-PHU", month, period);
                 MeterUsage childUsage = childOpt.orElseGet(MeterUsage::new);
                 
                 if (childUsage.getUsageId() == null) {
@@ -327,6 +336,7 @@ public class MonitoringPortalController {
                 childUsage.setAccountId(accountId);
                 childUsage.setMeterPointId("METER-03-PHU");
                 childUsage.setBillingCycleMonth(month);
+                childUsage.setPeriod(period);
                 childUsage.setFromDate(LocalDateTime.now().minusDays(30));
                 childUsage.setToDate(LocalDateTime.now());
                 childUsage.setStartIndex(BigDecimal.ZERO);
@@ -339,12 +349,13 @@ public class MonitoringPortalController {
             if ("KH004".equals(accountId)) {
                 // CD
                 Optional<MeterUsage> cdOpt = meterUsageRepository
-                        .findByAccountIdAndMeterPointIdAndBillingCycleMonth(accountId, "METER-04-CD", month);
+                        .findByAccountIdAndMeterPointIdAndBillingCycleMonthAndPeriod(accountId, "METER-04-CD", month, period);
                 MeterUsage cdUsage = cdOpt.orElseGet(MeterUsage::new);
                 if (cdUsage.getUsageId() == null) cdUsage.setUsageId(Math.abs(new Random().nextLong()));
                 cdUsage.setAccountId(accountId);
                 cdUsage.setMeterPointId("METER-04-CD");
                 cdUsage.setBillingCycleMonth(month);
+                cdUsage.setPeriod(period);
                 cdUsage.setFromDate(LocalDateTime.now().minusDays(30));
                 cdUsage.setToDate(LocalDateTime.now());
                 cdUsage.setStartIndex(BigDecimal.valueOf(500));
@@ -354,12 +365,13 @@ public class MonitoringPortalController {
 
                 // TD
                 Optional<MeterUsage> tdOpt = meterUsageRepository
-                        .findByAccountIdAndMeterPointIdAndBillingCycleMonth(accountId, "METER-04-TD", month);
+                        .findByAccountIdAndMeterPointIdAndBillingCycleMonthAndPeriod(accountId, "METER-04-TD", month, period);
                 MeterUsage tdUsage = tdOpt.orElseGet(MeterUsage::new);
                 if (tdUsage.getUsageId() == null) tdUsage.setUsageId(Math.abs(new Random().nextLong()));
                 tdUsage.setAccountId(accountId);
                 tdUsage.setMeterPointId("METER-04-TD");
                 tdUsage.setBillingCycleMonth(month);
+                tdUsage.setPeriod(period);
                 tdUsage.setFromDate(LocalDateTime.now().minusDays(30));
                 tdUsage.setToDate(LocalDateTime.now());
                 tdUsage.setStartIndex(BigDecimal.valueOf(300));
@@ -372,12 +384,13 @@ public class MonitoringPortalController {
             if ("KH005".equals(accountId)) {
                 // CD
                 Optional<MeterUsage> cdOpt = meterUsageRepository
-                        .findByAccountIdAndMeterPointIdAndBillingCycleMonth(accountId, "METER-05-CD", month);
+                        .findByAccountIdAndMeterPointIdAndBillingCycleMonthAndPeriod(accountId, "METER-05-CD", month, period);
                 MeterUsage cdUsage = cdOpt.orElseGet(MeterUsage::new);
                 if (cdUsage.getUsageId() == null) cdUsage.setUsageId(Math.abs(new Random().nextLong()));
                 cdUsage.setAccountId(accountId);
                 cdUsage.setMeterPointId("METER-05-CD");
                 cdUsage.setBillingCycleMonth(month);
+                cdUsage.setPeriod(period);
                 cdUsage.setFromDate(LocalDateTime.now().minusDays(30));
                 cdUsage.setToDate(LocalDateTime.now());
                 cdUsage.setStartIndex(BigDecimal.valueOf(500));
@@ -387,12 +400,13 @@ public class MonitoringPortalController {
 
                 // TD
                 Optional<MeterUsage> tdOpt = meterUsageRepository
-                        .findByAccountIdAndMeterPointIdAndBillingCycleMonth(accountId, "METER-05-TD", month);
+                        .findByAccountIdAndMeterPointIdAndBillingCycleMonthAndPeriod(accountId, "METER-05-TD", month, period);
                 MeterUsage tdUsage = tdOpt.orElseGet(MeterUsage::new);
                 if (tdUsage.getUsageId() == null) tdUsage.setUsageId(Math.abs(new Random().nextLong()));
                 tdUsage.setAccountId(accountId);
                 tdUsage.setMeterPointId("METER-05-TD");
                 tdUsage.setBillingCycleMonth(month);
+                tdUsage.setPeriod(period);
                 tdUsage.setFromDate(LocalDateTime.now().minusDays(30));
                 tdUsage.setToDate(LocalDateTime.now());
                 tdUsage.setStartIndex(BigDecimal.valueOf(300));
@@ -402,7 +416,7 @@ public class MonitoringPortalController {
             }
 
             // Step 3: Gọi API tính cước khẩn cấp của billing-worker
-            String calcUrl = "http://localhost:8081/api/v1/billing/calculate-immediate?accountId=" + accountId + "&month=" + month + "&bookId=" + bookId;
+            String calcUrl = "http://localhost:8081/api/v1/billing/calculate-immediate?accountId=" + accountId + "&month=" + month + "&period=" + period + "&bookId=" + bookId;
             restTemplate.postForEntity(calcUrl, null, String.class);
 
             return ResponseEntity.ok("Luồng xử lý tự động hoàn tất thành công cho tài khoản " + accountId);
@@ -415,26 +429,27 @@ public class MonitoringPortalController {
     @Transactional
     public ResponseEntity<String> deleteInvoice(
             @RequestParam String accountId,
-            @RequestParam String month) {
+            @RequestParam String month,
+            @RequestParam(defaultValue = "1") Integer period) {
         try {
             // Call billing-worker cancel billing logic first to handle statuses, cache, and logs
             try {
-                String workerCancelUrl = "http://localhost:8081/api/v1/billing/cancel?accountId=" + accountId + "&month=" + month;
+                String workerCancelUrl = "http://localhost:8081/api/v1/billing/cancel?accountId=" + accountId + "&month=" + month + "&period=" + period;
                 restTemplate.delete(workerCancelUrl);
             } catch (Exception e) {
                 log.warn("Failed to call billing-worker cancel endpoint during simulate/delete-invoice: {}", e.getMessage());
             }
 
             // Delete invoice
-            Optional<BillInvoice> invoiceOpt = billInvoiceRepository.findByAccountIdAndBillingCycleMonth(accountId, month);
+            Optional<BillInvoice> invoiceOpt = billInvoiceRepository.findByAccountIdAndBillingCycleMonthAndPeriod(accountId, month, period);
             invoiceOpt.ifPresent(billInvoice -> billInvoiceRepository.delete(billInvoice));
             
             // Delete meter usages to allow re-ingestion
-            List<MeterUsage> usages = meterUsageRepository.findByAccountIdAndBillingCycleMonthAndStatus(accountId, month, "VALIDATED");
+            List<MeterUsage> usages = meterUsageRepository.findByAccountIdAndBillingCycleMonthAndPeriodAndStatus(accountId, month, period, "VALIDATED");
             if (!usages.isEmpty()) {
                 meterUsageRepository.deleteAll(usages);
             }
-            List<MeterUsage> pendingUsages = meterUsageRepository.findByAccountIdAndBillingCycleMonthAndStatus(accountId, month, "PENDING_MANUAL");
+            List<MeterUsage> pendingUsages = meterUsageRepository.findByAccountIdAndBillingCycleMonthAndPeriodAndStatus(accountId, month, period, "PENDING_MANUAL");
             if (!pendingUsages.isEmpty()) {
                 meterUsageRepository.deleteAll(pendingUsages);
             }

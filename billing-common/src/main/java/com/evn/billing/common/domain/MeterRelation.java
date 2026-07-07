@@ -2,6 +2,7 @@ package com.evn.billing.common.domain;
 
 import jakarta.persistence.*;
 import lombok.Data;
+import java.time.LocalDate;
 
 @Entity
 @Table(name = "meter_relation")
@@ -21,4 +22,10 @@ public class MeterRelation {
 
     @Column(name = "relation_type", length = 20, nullable = false)
     private String relationType; // AGGREGATION, NETTING
+
+    @Column(name = "effective_from", nullable = false)
+    private LocalDate effectiveFrom;
+
+    @Column(name = "effective_to")
+    private LocalDate effectiveTo;
 }

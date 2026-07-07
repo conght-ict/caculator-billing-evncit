@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.math.BigDecimal;
 import java.util.*;
@@ -38,6 +39,9 @@ public class SnapshotGeneratorService {
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
+    @Autowired
+    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+
     /**
      * Scans active accounts, builds static snapshot profiles based on database relational data
      * (topology tree & tariffs), saves them to the DB snapshot table, and syncs to Redis Cache.
@@ -46,7 +50,7 @@ public class SnapshotGeneratorService {
      * @param month The billing cycle month (YYYY_MM)
      */
     @Transactional
-    public void generateSnapshotsForBook(String bookId, String month) {
+    public void generateSnapshotsForBook(String bookId, String month, Integer period) {
         List<Account> accounts = accountRepository.findByBookIdAndStatus(bookId, "ACTIVE");
         if (accounts.isEmpty()) {
             return;
@@ -55,11 +59,68 @@ public class SnapshotGeneratorService {
         // Seed sample data for testing if tables are empty
         seedSampleDataIfEmpty(bookId, accounts);
 
+        // Fetch all meter models in the database to map max_register_values
+        Map<String, BigDecimal> modelMaxRegisters = new HashMap<>();
+        try {
+            jdbcTemplate.query("SELECT model_code, max_register_value FROM meter_model", rs -> {
+                modelMaxRegisters.put(rs.getString(1), rs.getBigDecimal(2));
+            });
+        } catch (Exception e) {
+            log.warn("Failed to load meter models for topology mapping: {}", e.getMessage());
+        }
+
+        // Fetch target dates from book schedule
+        LocalDate periodFromDate = LocalDate.now().withDayOfMonth(1);
+        LocalDate periodToDate = LocalDate.now().withDayOfMonth(LocalDate.now().lengthOfMonth());
+        try {
+            String scheduleSql = "SELECT from_date, to_date FROM book_billing_schedule WHERE book_id = ? AND billing_cycle_month = ? AND period = ?";
+            Map<String, Object> scheduleMap = jdbcTemplate.queryForMap(scheduleSql, bookId, month, period);
+            if (scheduleMap != null) {
+                Object fromObj = scheduleMap.get("from_date");
+                if (fromObj instanceof java.sql.Date) {
+                    periodFromDate = ((java.sql.Date) fromObj).toLocalDate();
+                } else if (fromObj instanceof LocalDate) {
+                    periodFromDate = (LocalDate) fromObj;
+                }
+                
+                Object toObj = scheduleMap.get("to_date");
+                if (toObj instanceof java.sql.Date) {
+                    periodToDate = ((java.sql.Date) toObj).toLocalDate();
+                } else if (toObj instanceof LocalDate) {
+                    periodToDate = (LocalDate) toObj;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("No book schedule found for book: {}, month: {}, period: {}. Using default month bounds: {}", bookId, month, period, e.getMessage());
+            // Fallback parsing from YYYY_MM
+            try {
+                String[] parts = month.split("_");
+                int year = Integer.parseInt(parts[0]);
+                int monthVal = Integer.parseInt(parts[1]);
+                if (period == 1) {
+                    periodFromDate = LocalDate.of(year, monthVal, 1);
+                    periodToDate = LocalDate.of(year, monthVal, 10);
+                } else if (period == 2) {
+                    periodFromDate = LocalDate.of(year, monthVal, 11);
+                    periodToDate = LocalDate.of(year, monthVal, 20);
+                } else {
+                    periodFromDate = LocalDate.of(year, monthVal, 21);
+                    periodToDate = LocalDate.of(year, monthVal, java.time.YearMonth.of(year, monthVal).lengthOfMonth());
+                }
+            } catch (Exception ex) {
+                // Keep default
+            }
+        }
+
         List<BillingAccountSnapshot> snapshots = new ArrayList<>();
 
         for (Account account : accounts) {
             BillingConfigSnapshot config = new BillingConfigSnapshot();
             config.setAccountId(account.getAccountId());
+            config.setBookId(bookId);
+            config.setEffectiveSyncDate(LocalDate.now());
+            config.setPeriodFromDate(periodFromDate);
+            config.setPeriodToDate(periodToDate);
             
             // Set shared households normsFactor from Account entity
             int normsFactor = account.getNormsFactor();
@@ -76,7 +137,7 @@ public class SnapshotGeneratorService {
             List<MeterRelation> relations = meterRelationRepository.findRelationsByMeterIds(meterIds);
 
             // 3. Build Topology tree
-            MeterTopology topology = buildTopology(meterPoints, relations);
+            MeterTopology topology = buildTopology(meterPoints, relations, modelMaxRegisters);
             config.setMeterTopology(topology);
 
             // 4. Query and Map Tariffs
@@ -92,7 +153,7 @@ public class SnapshotGeneratorService {
             }
 
             // Determine if main meter is stepping or flat
-            String mainTariffCode = isFastPath ? meterPoints.get(0).getTariffCode() : "TARIFF_SHBT_2026";
+            String mainTariffCode = isFastPath ? meterPoints.get(0).getTariffCode() : "TARIFF_SHBT_2023";
             TariffRules mainTariff = tariffs.get(mainTariffCode);
             boolean isStepping = mainTariff == null || "STEPPING".equals(mainTariff.getType());
 
@@ -101,19 +162,21 @@ public class SnapshotGeneratorService {
 
             // 5. Create Entity Snapshot
             BillingAccountSnapshot snapshot = new BillingAccountSnapshot();
-            String snapshotId = account.getAccountId() + "_" + month + "_v1";
+            String snapshotId = account.getAccountId() + "_" + month + "_p" + period + "_v1";
             snapshot.setSnapshotId(snapshotId);
             snapshot.setAccountId(account.getAccountId());
             snapshot.setBookId(bookId);
             snapshot.setBillingCycleMonth(month);
+            snapshot.setPeriod(period);
             snapshot.setCalculationVersion(1);
+            snapshot.setEffectiveSyncDate(LocalDate.now());
             snapshot.setConfigData(config);
             snapshot.setCreatedAt(LocalDateTime.now());
 
             snapshots.add(snapshot);
 
             // 6. Synchronize to Redis Cache (TTL = 24 hours)
-            String cacheKey = "snapshot:" + account.getAccountId() + ":" + month;
+            String cacheKey = "snapshot:" + account.getAccountId() + ":" + month + ":" + period;
             try {
                 redisTemplate.opsForValue().set(cacheKey, config, 24, TimeUnit.HOURS);
             } catch (Exception e) {
@@ -127,7 +190,7 @@ public class SnapshotGeneratorService {
     /**
      * Builds hierarchical topology tree from flat database rows.
      */
-    private MeterTopology buildTopology(List<MeterPoint> meterPoints, List<MeterRelation> relations) {
+    private MeterTopology buildTopology(List<MeterPoint> meterPoints, List<MeterRelation> relations, Map<String, BigDecimal> maxRegisters) {
         Map<String, MeterPointNode> nodeMap = new HashMap<>();
         
         // Initialize all nodes
@@ -135,6 +198,8 @@ public class SnapshotGeneratorService {
             MeterPointNode node = new MeterPointNode();
             node.setMeterPointId(mp.getMeterPointId());
             node.setTariffCode(mp.getTariffCode());
+            node.setMeterSerial(mp.getMeterSerial());
+            node.setMaxRegisterValue(maxRegisters.getOrDefault(mp.getModelCode(), new BigDecimal("99999.9")));
             node.setChildPoints(new ArrayList<>());
             node.setCalculationType(CalculationType.AGGREGATION);
             nodeMap.put(mp.getMeterPointId(), node);
@@ -198,6 +263,8 @@ public class SnapshotGeneratorService {
             TariffRules rules = new TariffRules();
             rules.setTariffCode(t.getTariffCode());
             rules.setType(t.getType());
+            rules.setEffectiveDate(t.getEffectiveDate());
+            rules.setExpiryDate(t.getExpiryDate());
 
             List<TariffBlock> blocks = new ArrayList<>();
             List<TariffDetail> details = detailsMap.getOrDefault(t.getTariffCode(), Collections.emptyList());
@@ -212,6 +279,7 @@ public class SnapshotGeneratorService {
                 block.setMinKwh(d.getMinKwh().doubleValue());
                 block.setMaxKwh(d.getMaxKwh() != null ? d.getMaxKwh().doubleValue() : null);
                 block.setUnitPrice(d.getUnitPrice().doubleValue());
+                block.setTouPeriod(d.getTouPeriod());
                 blocks.add(block);
             }
             rules.setBlocks(blocks);
@@ -227,27 +295,29 @@ public class SnapshotGeneratorService {
     private void seedSampleDataIfEmpty(String bookId, List<Account> accounts) {
         if (tariffRepository.count() == 0) {
             Tariff t1 = new Tariff();
-            t1.setTariffCode("TARIFF_SHBT_2026");
+            t1.setTariffCode("TARIFF_SHBT_2023");
             t1.setName("Sinh hoạt bậc thang");
             t1.setType("STEPPING");
+            t1.setEffectiveDate(LocalDate.of(2023, 5, 4));
             tariffRepository.save(t1);
 
             List<TariffDetail> details = new ArrayList<>();
-            details.add(createDetail("TARIFF_SHBT_2026", 1, 0.0, 50.0, 1806.0));
-            details.add(createDetail("TARIFF_SHBT_2026", 2, 50.0, 100.0, 1866.0));
-            details.add(createDetail("TARIFF_SHBT_2026", 3, 100.0, 200.0, 2167.0));
-            details.add(createDetail("TARIFF_SHBT_2026", 4, 200.0, 300.0, 2729.0));
-            details.add(createDetail("TARIFF_SHBT_2026", 5, 300.0, 400.0, 3050.0));
-            details.add(createDetail("TARIFF_SHBT_2026", 6, 400.0, null, 3157.0));
+            details.add(createDetail("TARIFF_SHBT_2023", 1, 0.0, 50.0, 1806.0));
+            details.add(createDetail("TARIFF_SHBT_2023", 2, 50.0, 100.0, 1866.0));
+            details.add(createDetail("TARIFF_SHBT_2023", 3, 100.0, 200.0, 2167.0));
+            details.add(createDetail("TARIFF_SHBT_2023", 4, 200.0, 300.0, 2729.0));
+            details.add(createDetail("TARIFF_SHBT_2023", 5, 300.0, 400.0, 3050.0));
+            details.add(createDetail("TARIFF_SHBT_2023", 6, 400.0, null, 3157.0));
             tariffDetailRepository.saveAll(details);
 
             Tariff t2 = new Tariff();
-            t2.setTariffCode("TARIFF_KDOANH_2026");
+            t2.setTariffCode("TARIFF_KDOANH_2023");
             t2.setName("Kinh doanh đồng giá");
             t2.setType("FLAT");
+            t2.setEffectiveDate(LocalDate.of(2023, 5, 4));
             tariffRepository.save(t2);
 
-            TariffDetail d2 = createDetail("TARIFF_KDOANH_2026", 1, 0.0, null, 2500.0);
+            TariffDetail d2 = createDetail("TARIFF_KDOANH_2023", 1, 0.0, null, 2500.0);
             tariffDetailRepository.save(d2);
         }
 
@@ -257,21 +327,28 @@ public class SnapshotGeneratorService {
                 MeterPoint mp1 = new MeterPoint();
                 mp1.setMeterPointId("METER-TONG-" + account.getAccountId());
                 mp1.setAccountId(account.getAccountId());
-                mp1.setTariffCode("TARIFF_SHBT_2026");
+                mp1.setTariffCode("TARIFF_SHBT_2023");
                 mp1.setStatus("ACTIVE");
+                mp1.setModelCode("MODEL_SMART_AMI");
+                mp1.setMeterSerial("SN-TONG-" + account.getAccountId());
+                mp1.setInstalledDate(LocalDate.of(2025, 1, 1));
                 meterPointRepository.save(mp1);
 
                 MeterPoint mp2 = new MeterPoint();
                 mp2.setMeterPointId("METER-PHU-" + account.getAccountId());
                 mp2.setAccountId(account.getAccountId());
-                mp2.setTariffCode("TARIFF_KDOANH_2026");
+                mp2.setTariffCode("TARIFF_KDOANH_2023");
                 mp2.setStatus("ACTIVE");
+                mp2.setModelCode("MODEL_ELEC_5D");
+                mp2.setMeterSerial("SN-PHU-" + account.getAccountId());
+                mp2.setInstalledDate(LocalDate.of(2025, 1, 1));
                 meterPointRepository.save(mp2);
 
                 MeterRelation rel = new MeterRelation();
                 rel.setParentId(mp1.getMeterPointId());
                 rel.setChildId(mp2.getMeterPointId());
                 rel.setRelationType("NETTING");
+                rel.setEffectiveFrom(LocalDate.of(2025, 1, 1));
                 meterRelationRepository.save(rel);
             }
         }

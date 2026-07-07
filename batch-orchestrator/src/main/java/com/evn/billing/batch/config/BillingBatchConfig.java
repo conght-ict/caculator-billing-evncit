@@ -59,13 +59,15 @@ public class BillingBatchConfig {
     @StepScope
     public ItemProcessor<Account, BillingTaskDto> processor(
             @Value("#{jobParameters['month']}") String month,
+            @Value("#{jobParameters['period']}") Long period,
             @Value("#{jobParameters['calculationVersion']}") Long version) {
         return account -> {
             String traceId = UUID.randomUUID().toString().replace("-", "");
             int effectiveVersion = version != null ? version.intValue() : 1;
+            int effectivePeriod = period != null ? period.intValue() : 1;
             
             java.util.List<com.evn.billing.common.domain.MeterUsage> validatedUsages = meterUsageRepository
-                    .findByAccountIdAndBillingCycleMonthAndStatus(account.getAccountId(), month, "VALIDATED");
+                    .findByAccountIdAndBillingCycleMonthAndPeriodAndStatus(account.getAccountId(), month, effectivePeriod, "VALIDATED");
             
             java.util.List<com.evn.billing.batch.dto.MeterReadingDto> readings = validatedUsages.stream()
                     .map(u -> new com.evn.billing.batch.dto.MeterReadingDto(
@@ -82,6 +84,7 @@ public class BillingBatchConfig {
                     account.getAccountId(),
                     account.getBookId(),
                     month,
+                    effectivePeriod,
                     effectiveVersion,
                     traceId,
                     readings

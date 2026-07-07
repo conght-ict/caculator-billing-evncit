@@ -12,6 +12,7 @@ public class BillingTaskDto {
     private String accountId;
     private String bookId;
     private String billingCycleMonth;
+    private int period;
     private int calculationVersion;
     private String traceId;
     private List<MeterReadingDto> readings;

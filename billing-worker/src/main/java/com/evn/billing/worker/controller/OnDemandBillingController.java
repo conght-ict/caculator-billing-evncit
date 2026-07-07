@@ -30,11 +30,12 @@ public class OnDemandBillingController {
     public ResponseEntity<?> calculateImmediate(
             @RequestParam String accountId,
             @RequestParam String month,
+            @RequestParam(defaultValue = "1") Integer period,
             @RequestParam(defaultValue = "1") Integer version,
             @RequestParam(defaultValue = "SO_DEMAND") String bookId) {
-        log.info("[ON-DEMAND-SYNC] Received synchronous immediate calculation request for Account: {}, Month: {}, Book: {}", accountId, month, bookId);
+        log.info("[ON-DEMAND-SYNC] Received synchronous immediate calculation request for Account: {}, Month: {}, Period: {}, Book: {}", accountId, month, period, bookId);
         try {
-            BillingTaskDto task = new BillingTaskDto(accountId, bookId, month, version, "on_demand_trace");
+            BillingTaskDto task = new BillingTaskDto(accountId, bookId, month, period, version, "on_demand_trace");
             billingService.processBilling(task);
             log.info("[ON-DEMAND-SYNC] Synchronous immediate calculation succeeded for Account: {}", accountId);
             return ResponseEntity.ok("Invoice calculated successfully on demand.");
@@ -52,10 +53,11 @@ public class OnDemandBillingController {
     @org.springframework.web.bind.annotation.DeleteMapping("/cancel")
     public ResponseEntity<?> cancelBilling(
             @RequestParam String accountId,
-            @RequestParam String month) {
-        log.info("[CANCEL-BILL-API] Received request to cancel billing for Account: {}, Month: {}", accountId, month);
+            @RequestParam String month,
+            @RequestParam(defaultValue = "1") Integer period) {
+        log.info("[CANCEL-BILL-API] Received request to cancel billing for Account: {}, Month: {}, Period: {}", accountId, month, period);
         try {
-            billingService.cancelBilling(accountId, month);
+            billingService.cancelBilling(accountId, month, period);
             log.info("[CANCEL-BILL-API] Successfully cancelled billing and evicted cache for Account: {}", accountId);
             return ResponseEntity.ok("Billing calculation cancelled successfully. Status set to CANCELLED.");
         } catch (Exception e) {

@@ -16,4 +16,8 @@ public class MeterReadingDto {
     private BigDecimal startIndex;
     private BigDecimal endIndex;
     private BigDecimal consumption;
+    private Boolean isRollover;
+    private BigDecimal maxRegisterSnapshot;
+    private Integer subReadingSeq;
+    private String recordType;
 }

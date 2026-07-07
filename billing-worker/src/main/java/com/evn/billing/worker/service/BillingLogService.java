@@ -8,10 +8,8 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import java.util.*;
 import java.util.concurrent.ConcurrentLinkedQueue;
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -30,17 +28,19 @@ public class BillingLogService {
         public String bookId;
         public String accountId;
         public String billingCycleMonth;
+        public int period;
         public String status;
         public String inputData;
         public String outputData;
         public String errorMessage;
         public java.sql.Timestamp createdAt;
 
-        public CalculationLogEntry(String bookId, String accountId, String billingCycleMonth, String status, String inputData, String outputData, String errorMessage) {
+        public CalculationLogEntry(String bookId, String accountId, String billingCycleMonth, int period, String status, String inputData, String outputData, String errorMessage) {
             this.logId = UUID.randomUUID();
             this.bookId = bookId;
             this.accountId = accountId;
             this.billingCycleMonth = billingCycleMonth;
+            this.period = period;
             this.status = status;
             this.inputData = inputData;
             this.outputData = outputData;
@@ -49,30 +49,8 @@ public class BillingLogService {
         }
     }
 
-    @PostConstruct
-    public void initSchema() {
-        try {
-            log.info("Initializing billing_calculation_log database table...");
-            jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS billing_calculation_log (" +
-                    "log_id UUID PRIMARY KEY, " +
-                    "book_id VARCHAR(50) NOT NULL, " +
-                    "account_id VARCHAR(50) NOT NULL, " +
-                    "billing_cycle_month VARCHAR(20) NOT NULL, " +
-                    "status VARCHAR(20) NOT NULL, " +
-                    "input_data JSONB, " +
-                    "output_data JSONB, " +
-                    "error_message TEXT, " +
-                    "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
-            jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_calc_log_book ON billing_calculation_log(book_id)");
-            jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_calc_log_account ON billing_calculation_log(account_id)");
-            log.info("Table billing_calculation_log and indexes initialized successfully.");
-        } catch (Exception e) {
-            log.error("Failed to initialize billing_calculation_log schema: {}", e.getMessage(), e);
-        }
-    }
-
-    public void enqueueLog(String bookId, String accountId, String billingCycleMonth, String status, String inputData, String outputData, String errorMessage) {
-        logQueue.offer(new CalculationLogEntry(bookId, accountId, billingCycleMonth, status, inputData, outputData, errorMessage));
+    public void enqueueLog(String bookId, String accountId, String billingCycleMonth, int period, String status, String inputData, String outputData, String errorMessage) {
+        logQueue.offer(new CalculationLogEntry(bookId, accountId, billingCycleMonth, period, status, inputData, outputData, errorMessage));
     }
 
     @Scheduled(fixedDelay = 200)
@@ -91,8 +69,8 @@ public class BillingLogService {
         if (entries.isEmpty()) return;
 
         try {
-            String sql = "INSERT INTO billing_calculation_log (log_id, book_id, account_id, billing_cycle_month, status, input_data, output_data, error_message, created_at) " +
-                    "VALUES (?::uuid, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?)";
+            String sql = "INSERT INTO billing_calculation_log (log_id, book_id, account_id, billing_cycle_month, period, status, input_data, output_data, error_message, created_at) " +
+                    "VALUES (?::uuid, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?)";
             
             List<Object[]> batchArgs = new ArrayList<>();
             for (CalculationLogEntry e : entries) {
@@ -101,6 +79,7 @@ public class BillingLogService {
                     e.bookId,
                     e.accountId,
                     e.billingCycleMonth,
+                    e.period,
                     e.status,
                     e.inputData,
                     e.outputData,
@@ -114,6 +93,7 @@ public class BillingLogService {
                 java.sql.Types.VARCHAR,
                 java.sql.Types.VARCHAR,
                 java.sql.Types.VARCHAR,
+                java.sql.Types.INTEGER,
                 java.sql.Types.VARCHAR,
                 java.sql.Types.VARCHAR,
                 java.sql.Types.VARCHAR,

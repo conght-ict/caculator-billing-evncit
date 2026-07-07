@@ -31,19 +31,20 @@ public class BatchMasterController {
     private BatchService batchService;
 
     @Autowired
-    private com.evn.billing.batch.repository.BookBillingRunRepository bookBillingRunRepository;
+    private com.evn.billing.batch.repository.BookBillingScheduleRepository bookBillingScheduleRepository;
 
     @GetMapping("/validate")
     public ResponseEntity<String> validateBatch(
             @RequestParam String bookId,
-            @RequestParam String month) {
-        java.util.Optional<com.evn.billing.common.domain.BookBillingRun> runOpt = 
-                bookBillingRunRepository.findByBookIdAndBillingCycleMonth(bookId, month);
-        if (runOpt.isPresent() && "COMPLETED".equals(runOpt.get().getStatus())) {
+            @RequestParam String month,
+            @RequestParam(defaultValue = "1") Integer period) {
+        java.util.Optional<com.evn.billing.common.domain.BookBillingSchedule> runOpt = 
+                bookBillingScheduleRepository.findByBookIdAndBillingCycleMonthAndPeriod(bookId, month, period);
+        if (runOpt.isPresent() && "COMPLETED".equals(runOpt.get().getRunStatus())) {
             return ResponseEntity.ok("BOOK_ALREADY_CALCULATED_NEEDS_CANCEL");
         }
 
-        boolean isReady = batchService.validateBookReadiness(bookId, month);
+        boolean isReady = batchService.validateBookReadiness(bookId, month, period);
         if (isReady) {
             return ResponseEntity.ok("READY_FOR_BILLING");
         } else {
@@ -55,11 +56,12 @@ public class BatchMasterController {
     public ResponseEntity<String> runBatch(
             @RequestParam String bookId,
             @RequestParam String month,
+            @RequestParam(defaultValue = "1") Integer period,
             @RequestParam(defaultValue = "1") Long version) {
         
-        java.util.Optional<com.evn.billing.common.domain.BookBillingRun> runOpt = 
-                bookBillingRunRepository.findByBookIdAndBillingCycleMonth(bookId, month);
-        if (runOpt.isPresent() && "COMPLETED".equals(runOpt.get().getStatus())) {
+        java.util.Optional<com.evn.billing.common.domain.BookBillingSchedule> runOpt = 
+                bookBillingScheduleRepository.findByBookIdAndBillingCycleMonthAndPeriod(bookId, month, period);
+        if (runOpt.isPresent() && "COMPLETED".equals(runOpt.get().getRunStatus())) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body("Sổ đã được tính cước thành công cho kỳ này. Vui lòng hủy lịch sử tính cước cũ của Sổ trước khi chạy lại.");
         }
@@ -68,6 +70,7 @@ public class BatchMasterController {
             Map<String, JobParameter<?>> params = new HashMap<>();
             params.put("bookId", new JobParameter<>(bookId, String.class));
             params.put("month", new JobParameter<>(month, String.class));
+            params.put("period", new JobParameter<>(period.longValue(), Long.class));
             params.put("calculationVersion", new JobParameter<>(version, Long.class));
             params.put("time", new JobParameter<>(System.currentTimeMillis(), Long.class)); // avoids job parameter collision
 

@@ -27,7 +27,7 @@ public class OutboxEvent {
     @Column(name = "aggregate_type", length = 50, nullable = false)
     private String aggregateType;
 
-    @Column(name = "aggregate_id", length = 50, nullable = false)
+    @Column(name = "aggregate_id", length = 100, nullable = false)
     private String aggregateId;
 
     @Column(name = "event_type", length = 50, nullable = false)
@@ -37,6 +37,9 @@ public class OutboxEvent {
     @Column(name = "payload", nullable = false)
     private String payload; // Stored as JSONB in DB
 
-    @Column(name = "created_at", nullable = false)
+    @Column(name = "status", length = 20, nullable = false)
+    private String status = "PENDING"; // PENDING, SENT
+
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 }

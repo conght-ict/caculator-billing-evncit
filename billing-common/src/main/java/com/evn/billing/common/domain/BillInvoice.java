@@ -20,18 +20,21 @@ import java.time.LocalDateTime;
 public class BillInvoice {
 
     @Id
-    @Column(name = "invoice_id", length = 50)
+    @Column(name = "invoice_id", length = 100)
     private String invoiceId;
 
     @Id
-    @Column(name = "billing_cycle_month", length = 10)
+    @Column(name = "billing_cycle_month", length = 20)
     private String billingCycleMonth; // Format: YYYY_MM
 
     @Column(name = "account_id", length = 50, nullable = false)
     private String accountId;
 
-    @Column(name = "book_id", length = 20, nullable = false)
+    @Column(name = "book_id", length = 50, nullable = false)
     private String bookId;
+
+    @Column(name = "period", nullable = false)
+    private Integer period = 1;
 
     @Column(name = "total_amount_before_tax", nullable = false, precision = 15, scale = 2)
     private BigDecimal totalAmountBeforeTax;
@@ -42,13 +45,25 @@ public class BillInvoice {
     @Column(name = "total_amount_after_tax", nullable = false, precision = 15, scale = 2)
     private BigDecimal totalAmountAfterTax;
 
-    @Column(name = "idempotency_key", length = 100, nullable = false)
+    @Column(name = "idempotency_key", length = 200, nullable = false)
     private String idempotencyKey;
 
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "billing_manifest", nullable = false)
     private String billingManifest; // Stored as JSONB in DB
 
-    @Column(name = "created_at", nullable = false)
+    @Column(name = "proration_applied", nullable = false)
+    private Boolean prorationApplied = false;
+
+    @Column(name = "snapshot_ref", length = 200)
+    private String snapshotRef;
+
+    @Column(name = "calculation_status", length = 20, nullable = false)
+    private String calculationStatus = "FINAL"; // FINAL, RECALCULATED, DISPUTED
+
+    @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
+
+    @Column(name = "updated_at", nullable = false)
+    private LocalDateTime updatedAt = LocalDateTime.now();
 }
