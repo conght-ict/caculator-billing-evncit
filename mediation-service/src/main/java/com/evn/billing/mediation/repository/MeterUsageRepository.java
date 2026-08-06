@@ -12,12 +12,17 @@ import java.util.Optional;
 @Repository
 public interface MeterUsageRepository extends JpaRepository<MeterUsage, MeterUsageId> {
 
-    List<MeterUsage> findByAccountIdAndBillingCycleMonthAndPeriod(String accountId, String billingCycleMonth, Integer period);
+    List<MeterUsage> findByMaKhangAndThangChuKyAndKyChot(String maKhang, String thangChuKy, Integer kyChot);
 
-    List<MeterUsage> findByAccountIdAndBillingCycleMonthAndPeriodAndStatus(String accountId, String billingCycleMonth, Integer period, String status);
+    List<MeterUsage> findByMaKhangAndThangChuKyAndKyChotAndTrangThaiXuLy(String maKhang, String thangChuKy, Integer kyChot, String trangThaiXuLy);
 
-    @Query("SELECT m FROM MeterUsage m WHERE m.billingCycleMonth = :month AND m.period = :period AND m.status = 'PENDING_MANUAL'")
+    @Query("SELECT m FROM MeterUsage m WHERE m.thangChuKy = :month AND m.kyChot = :period AND m.trangThaiXuLy = 'PENDING_MANUAL'")
     List<MeterUsage> findPendingManualByMonthAndPeriod(@Param("month") String month, @Param("period") Integer period);
 
-    Optional<MeterUsage> findByAccountIdAndMeterPointIdAndBillingCycleMonthAndPeriod(String accountId, String meterPointId, String billingCycleMonth, Integer period);
+    Optional<MeterUsage> findByMaKhangAndMaDdoAndThangChuKyAndKyChot(String maKhang, String maDdo, String thangChuKy, Integer kyChot);
+
+    @Query("SELECT COUNT(m) FROM MeterUsage m WHERE m.maKhang IN " +
+           "(SELECT mp.maKhang FROM MeterPoint mp WHERE mp.dtuongQly = :dtuongQly AND mp.trangThai = 'ACTIVE') " +
+           "AND m.thangChuKy = :month AND m.kyChot = :period AND m.trangThaiXuLy = 'PENDING_MANUAL'")
+    long countPendingReadingsForBook(@Param("dtuongQly") String dtuongQly, @Param("month") String month, @Param("period") Integer period);
 }

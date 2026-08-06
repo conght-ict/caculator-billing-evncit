@@ -1,0 +1,70 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: debezium-cdc
+  namespace: evn-billing
+  labels:
+    app: debezium-cdc
+    component: cdc-connect
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: debezium-cdc
+  template:
+    metadata:
+      labels:
+        app: debezium-cdc
+        component: cdc-connect
+    spec:
+      containers:
+      - name: debezium-connect
+        image: debezium/connect:2.5
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: BOOTSTRAP_SERVERS
+          value: "host.docker.internal:9092"
+        - name: GROUP_ID
+          value: "billing-connect-group"
+        - name: CONFIG_STORAGE_TOPIC
+          value: "k8s_connect_configs"
+        - name: OFFSET_STORAGE_TOPIC
+          value: "k8s_connect_offsets"
+        - name: STATUS_STORAGE_TOPIC
+          value: "k8s_connect_statuses"
+        - name: KEY_CONVERTER
+          value: "org.apache.kafka.connect.json.JsonConverter"
+        - name: VALUE_CONVERTER
+          value: "org.apache.kafka.connect.json.JsonConverter"
+        - name: CONFIG_STORAGE_REPLICATION_FACTOR
+          value: "1"
+        - name: OFFSET_STORAGE_REPLICATION_FACTOR
+          value: "1"
+        - name: STATUS_STORAGE_REPLICATION_FACTOR
+          value: "1"
+        - name: KAFKA_HEAP_OPTS
+          value: "-Xms512m -Xmx1g"
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+        ports:
+        - containerPort: 8083
+          name: rest-api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: debezium-cdc-service
+  namespace: evn-billing
+spec:
+  type: ClusterIP
+  selector:
+    app: debezium-cdc
+  ports:
+  - port: 8083
+    targetPort: 8083
+    name: rest-api

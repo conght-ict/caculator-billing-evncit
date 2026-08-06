@@ -20,7 +20,7 @@
     </parent>
 
     <properties>
-        <java.version>21</java.version>
+        <java.version>17</java.version>
         <spring-cloud.version>2023.0.2</spring-cloud.version>
         <lombok.version>1.18.32</lombok.version>
         <jackson.version>2.17.1</jackson.version>
@@ -31,7 +31,6 @@
         <module>rating-engine</module>
         <module>mediation-service</module>
         <module>snapshot-generator</module>
-        <module>batch-orchestrator</module>
         <module>billing-worker</module>
     </modules>
 
@@ -68,4 +67,28 @@
             <scope>provided</scope>
         </dependency>
     </dependencies>
+
+    <profiles>
+        <profile>
+            <id>native</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.graalvm.buildtools</groupId>
+                        <artifactId>native-maven-plugin</artifactId>
+                        <extensions>true</extensions>
+                        <executions>
+                            <execution>
+                                <id>build-native</id>
+                                <goals>
+                                    <goal>compile-no-fork</goal>
+                                </goals>
+                                <phase>package</phase>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

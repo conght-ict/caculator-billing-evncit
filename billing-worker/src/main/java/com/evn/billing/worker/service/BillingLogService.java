@@ -2,8 +2,8 @@ package com.evn.billing.worker.service;
 
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import com.evn.billing.worker.repository.BillingLogRepository;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import java.util.*;
@@ -19,13 +19,13 @@ public class BillingLogService {
     private static final Logger log = LoggerFactory.getLogger(BillingLogService.class);
 
     @Autowired
-    private JdbcTemplate jdbcTemplate;
+    private BillingLogRepository billingLogRepository;
 
     private final ConcurrentLinkedQueue<CalculationLogEntry> logQueue = new ConcurrentLinkedQueue<>();
 
     public static class CalculationLogEntry {
         public UUID logId;
-        public String bookId;
+        public String dtuongQly;
         public String accountId;
         public String billingCycleMonth;
         public int period;
@@ -35,9 +35,9 @@ public class BillingLogService {
         public String errorMessage;
         public java.sql.Timestamp createdAt;
 
-        public CalculationLogEntry(String bookId, String accountId, String billingCycleMonth, int period, String status, String inputData, String outputData, String errorMessage) {
+        public CalculationLogEntry(String dtuongQly, String accountId, String billingCycleMonth, int period, String status, String inputData, String outputData, String errorMessage) {
             this.logId = UUID.randomUUID();
-            this.bookId = bookId;
+            this.dtuongQly = dtuongQly;
             this.accountId = accountId;
             this.billingCycleMonth = billingCycleMonth;
             this.period = period;
@@ -49,8 +49,8 @@ public class BillingLogService {
         }
     }
 
-    public void enqueueLog(String bookId, String accountId, String billingCycleMonth, int period, String status, String inputData, String outputData, String errorMessage) {
-        logQueue.offer(new CalculationLogEntry(bookId, accountId, billingCycleMonth, period, status, inputData, outputData, errorMessage));
+    public void enqueueLog(String dtuongQly, String accountId, String billingCycleMonth, int period, String status, String inputData, String outputData, String errorMessage) {
+        logQueue.offer(new CalculationLogEntry(dtuongQly, accountId, billingCycleMonth, period, status, inputData, outputData, errorMessage));
     }
 
     @Scheduled(fixedDelay = 200)
@@ -69,39 +69,7 @@ public class BillingLogService {
         if (entries.isEmpty()) return;
 
         try {
-            String sql = "INSERT INTO billing_calculation_log (log_id, book_id, account_id, billing_cycle_month, period, status, input_data, output_data, error_message, created_at) " +
-                    "VALUES (?::uuid, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?)";
-            
-            List<Object[]> batchArgs = new ArrayList<>();
-            for (CalculationLogEntry e : entries) {
-                batchArgs.add(new Object[] {
-                    e.logId.toString(),
-                    e.bookId,
-                    e.accountId,
-                    e.billingCycleMonth,
-                    e.period,
-                    e.status,
-                    e.inputData,
-                    e.outputData,
-                    e.errorMessage,
-                    e.createdAt
-                });
-            }
-
-            int[] argTypes = new int[] {
-                java.sql.Types.VARCHAR,
-                java.sql.Types.VARCHAR,
-                java.sql.Types.VARCHAR,
-                java.sql.Types.VARCHAR,
-                java.sql.Types.INTEGER,
-                java.sql.Types.VARCHAR,
-                java.sql.Types.VARCHAR,
-                java.sql.Types.VARCHAR,
-                java.sql.Types.VARCHAR,
-                java.sql.Types.TIMESTAMP
-            };
-
-            jdbcTemplate.batchUpdate(sql, batchArgs, argTypes);
+            billingLogRepository.batchInsertCalculationLogs(entries);
         } catch (Exception ex) {
             log.error("Failed to save calculation logs batch: {}", ex.getMessage(), ex);
         }

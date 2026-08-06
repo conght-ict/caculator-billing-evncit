@@ -1,0 +1,65 @@
+{
+  "mcpServers": {
+    "billing-common": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "e:/caculator-billing-evncit/billing-common"
+      ]
+    },
+    "rating-engine": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "e:/caculator-billing-evncit/rating-engine"
+      ]
+    },
+    "mediation-service": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "e:/caculator-billing-evncit/mediation-service"
+      ]
+    },
+    "snapshot-generator": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "e:/caculator-billing-evncit/snapshot-generator"
+      ]
+    },
+    "billing-worker": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "e:/caculator-billing-evncit/billing-worker"
+      ]
+    },
+    "codegraph-cross-repo": {
+      "command": "codegraph-mcp",
+      "args": [
+        "--search-paths",
+        "e:/caculator-billing-evncit/billing-common,e:/caculator-billing-evncit/rating-engine,e:/caculator-billing-evncit/mediation-service,e:/caculator-billing-evncit/snapshot-generator,e:/caculator-billing-evncit/billing-worker"
+      ]
+    },
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://postgres:postgres@localhost:5432/billing_db"
+      ]
+    },
+    "oracle": {
+      "command": "python",
+      "args": [
+        "e:\\caculator-billing-evncit\\.agents\\mcp\\oracle_mcp_server.py"
+      ]
+    }
+  }
+}

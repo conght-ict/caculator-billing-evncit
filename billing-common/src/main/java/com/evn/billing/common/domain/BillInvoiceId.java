@@ -9,6 +9,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class BillInvoiceId implements Serializable {
-    private String invoiceId;
-    private String billingCycleMonth;
+    private String idHoaDon;
+    private String thangChuKy;
 }

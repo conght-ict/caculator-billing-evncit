@@ -20,9 +20,13 @@ spring:
 
   jpa:
     open-in-view: false
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
       ddl-auto: update
     show-sql: false
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
 
   data:
     redis:
@@ -38,3 +42,25 @@ spring:
   threads:
     virtual:
       enabled: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+billing:
+  snapshot:
+    default-tariff: "TARIFF_SHBT_2023"
+    grace-periods:
+      "R-01": 3
+      "R-02": 1
+      "R-03": 3
+      "R-06": 7
+      "R-08": 5
+      "R-09": 5
+      "R-11": 7

@@ -13,53 +13,56 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "bill_invoice")
+@Table(name = "hoa_don")
 @IdClass(BillInvoiceId.class)
 @Getter
 @Setter
 public class BillInvoice {
 
     @Id
-    @Column(name = "invoice_id", length = 100)
-    private String invoiceId;
+    @Column(name = "id_hoa_don", length = 100)
+    private String idHoaDon;
 
     @Id
-    @Column(name = "billing_cycle_month", length = 20)
-    private String billingCycleMonth; // Format: YYYY_MM
+    @Column(name = "thang_chu_ky", length = 20)
+    private String thangChuKy; // Format: YYYY_MM
 
-    @Column(name = "account_id", length = 50, nullable = false)
-    private String accountId;
+    @Column(name = "ma_khang", length = 50, nullable = false)
+    private String maKhang;
 
-    @Column(name = "book_id", length = 50, nullable = false)
-    private String bookId;
+    @Column(name = "ma_sogcs", length = 50, nullable = false)
+    private String dtuongQly;
 
-    @Column(name = "period", nullable = false)
-    private Integer period = 1;
+    @Column(name = "ky_chot", nullable = false)
+    private Integer kyChot = 1;
 
-    @Column(name = "total_amount_before_tax", nullable = false, precision = 15, scale = 2)
-    private BigDecimal totalAmountBeforeTax;
+    @Column(name = "tong_tien_truoc_thue", nullable = false, precision = 15, scale = 2)
+    private BigDecimal tongTienTruocThue;
 
-    @Column(name = "tax_amount", nullable = false, precision = 15, scale = 2)
-    private BigDecimal taxAmount;
+    @Column(name = "tien_thue", nullable = false, precision = 15, scale = 2)
+    private BigDecimal tienThue;
 
-    @Column(name = "total_amount_after_tax", nullable = false, precision = 15, scale = 2)
-    private BigDecimal totalAmountAfterTax;
+    @Column(name = "tong_tien_sau_thue", nullable = false, precision = 15, scale = 2)
+    private BigDecimal tongTienSauThue;
 
-    @Column(name = "idempotency_key", length = 200, nullable = false)
-    private String idempotencyKey;
+    @Column(name = "khoa_lap_trung", length = 200, nullable = false)
+    private String khoaLapTrung;
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "billing_manifest", nullable = false)
-    private String billingManifest; // Stored as JSONB in DB
+    @Column(name = "ban_ke_tinh_toan", nullable = false)
+    private String banKeTinhToan; // Stored as JSONB in DB
 
-    @Column(name = "proration_applied", nullable = false)
-    private Boolean prorationApplied = false;
+    @Column(name = "ap_dung_phan_bo", nullable = false)
+    private Boolean apDungPhanBo = false;
 
-    @Column(name = "snapshot_ref", length = 200)
-    private String snapshotRef;
+    @Column(name = "ref_snapshot", length = 200)
+    private String refSnapshot;
 
-    @Column(name = "calculation_status", length = 20, nullable = false)
-    private String calculationStatus = "FINAL"; // FINAL, RECALCULATED, DISPUTED
+    @Column(name = "trang_thai_tinh_toan", length = 20, nullable = false)
+    private String trangThaiTinhToan = "FINAL"; // FINAL, RECALCULATED, DISPUTED
+
+    @Column(name = "ma_dviqly", length = 20, nullable = false)
+    private String maDviqly = "PD0600";
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();

@@ -10,44 +10,44 @@ import lombok.Setter;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "account_billing_status")
+@Table(name = "trang_thai_tinh_toan_kh")
 @IdClass(AccountBillingStatusId.class)
 @Getter
 @Setter
 public class AccountBillingStatus {
 
     @Id
-    @Column(name = "account_id", length = 50)
-    private String accountId;
+    @Column(name = "ma_khang", length = 50)
+    private String maKhang;
 
     @Id
-    @Column(name = "billing_cycle_month", length = 20)
-    private String billingCycleMonth;
+    @Column(name = "thang_chu_ky", length = 20)
+    private String thangChuKy;
 
     @Id
-    @Column(name = "period")
-    private Integer period = 1;
+    @Column(name = "ky_chot")
+    private Integer kyChot = 1;
 
-    @Column(name = "book_id", length = 50, nullable = false)
-    private String bookId;
+    @Column(name = "dtuong_qly", length = 50, nullable = false)
+    private String dtuongQly;
 
-    @Column(name = "status", length = 20, nullable = false)
-    private String status = "PENDING"; // PENDING, PROCESSING, SUCCESS, FAILED, DLQ
+    @Column(name = "trang_thai", length = 20, nullable = false)
+    private String trangThai = "PENDING"; // PENDING, PROCESSING, SUCCESS, FAILED, DLQ
 
-    @Column(name = "invoice_id", length = 100)
-    private String invoiceId;
+    @Column(name = "id_hoa_don", length = 100)
+    private String idHoaDon;
 
-    @Column(name = "error_message")
-    private String errorMessage;
+    @Column(name = "thong_bao_loi")
+    private String thongBaoLoi;
 
-    @Column(name = "retry_count", nullable = false)
-    private Integer retryCount = 0;
+    @Column(name = "so_lan_thu_lai", nullable = false)
+    private Integer soLanThuLai = 0;
 
-    @Column(name = "processing_time_ms")
-    private Long processingTimeMs;
+    @Column(name = "thoi_gian_xu_ly_ms")
+    private Long thoiGianXuLyMs;
 
-    @Column(name = "worker_node", length = 100)
-    private String workerNode;
+    @Column(name = "ten_worker", length = 100)
+    private String tenWorker;
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt = LocalDateTime.now();

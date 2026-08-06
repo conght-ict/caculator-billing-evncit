@@ -5,27 +5,27 @@ import lombok.Data;
 import java.time.LocalDate;
 
 @Entity
-@Table(name = "meter_relation")
+@Table(name = "quan_he_diem_do")
 @Data
 public class MeterRelation {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "relation_id")
-    private Long relationId;
+    @Column(name = "id_quan_he")
+    private Long idQuanHe;
 
-    @Column(name = "parent_id", length = 50, nullable = false)
-    private String parentId;
+    @Column(name = "ma_ddo_cha", length = 50, nullable = false)
+    private String maDdoCha;
 
-    @Column(name = "child_id", length = 50, nullable = false)
-    private String childId;
+    @Column(name = "ma_ddo_con", length = 50, nullable = false)
+    private String maDdoCon;
 
-    @Column(name = "relation_type", length = 20, nullable = false)
-    private String relationType; // AGGREGATION, NETTING
+    @Column(name = "loai_quan_he", length = 20, nullable = false)
+    private String loaiQuanHe; // AGGREGATION, NETTING
 
-    @Column(name = "effective_from", nullable = false)
-    private LocalDate effectiveFrom;
+    @Column(name = "ngay_hieu_luc", nullable = false)
+    private LocalDate ngayHieuLuc;
 
-    @Column(name = "effective_to")
-    private LocalDate effectiveTo;
+    @Column(name = "ngay_het_han")
+    private LocalDate ngayHetHan;
 }

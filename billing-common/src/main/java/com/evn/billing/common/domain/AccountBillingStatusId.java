@@ -9,7 +9,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class AccountBillingStatusId implements Serializable {
-    private String accountId;
-    private String billingCycleMonth;
-    private Integer period;
+    private String maKhang;
+    private String thangChuKy;
+    private Integer kyChot;
 }

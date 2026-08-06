@@ -1,6 +1,6 @@
 package com.evn.billing.worker.listener;
 
-import com.evn.billing.worker.dto.BillingTaskDto;
+import com.evn.billing.common.dto.BillingTaskDto;
 import com.evn.billing.worker.service.BillingService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -123,6 +123,6 @@ public class BillingKafkaListener {
     @DltHandler
     public void handleDlt(BillingTaskDto task, @Header(KafkaHeaders.RECEIVED_TOPIC) String topic) {
         log.error("ALERT: Billing task permanently failed. Sent to DLT. Account: {}, Topic: {}", 
-                task.getAccountId(), topic);
+                task.getMaKhang(), topic);
     }
 }

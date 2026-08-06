@@ -6,9 +6,9 @@ import java.util.List;
 
 @Data
 public class TariffRules {
-    private String tariffCode;
-    private String type; // STEPPING, FLAT, TOU
-    private LocalDate effectiveDate;
-    private LocalDate expiryDate;
+    private String maNgia;
+    private String loaiBieuGia; // STEPPING, FLAT, TOU
+    private LocalDate ngayHieuLuc;
+    private LocalDate ngayHetHan;
     private List<TariffBlock> blocks;
 }

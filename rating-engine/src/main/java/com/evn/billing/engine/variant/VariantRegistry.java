@@ -11,6 +11,9 @@ public class VariantRegistry {
         registry.put("FLAT_RATING", new FlatRatingVariant());
         registry.put("PERCENT_DISCOUNT", new PercentDiscountVariant());
         registry.put("TAX", new TaxCalculationVariant());
+        registry.put("EXPRESSION_EVAL", new ExpressionEvalVariant());
+        registry.put("NETTING_CALCULATOR", new NettingCalculatorVariant());
+        registry.put("TOU_RATING", new TouRatingVariant());
     }
 
     public static BillingVariant get(String name) {

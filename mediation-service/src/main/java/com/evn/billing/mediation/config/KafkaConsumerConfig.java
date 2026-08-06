@@ -34,7 +34,7 @@ public class KafkaConsumerConfig {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setBatchListener(true);
-        factory.setConcurrency(32);
+        factory.setConcurrency(4);
         
         SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor("mediation-batch-vt-");
         executor.setVirtualThreads(true);

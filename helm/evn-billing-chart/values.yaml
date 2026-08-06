@@ -1,0 +1,70 @@
+# Values mặc định cho Helm Chart evn-billing-chart
+
+global:
+  environment: local # local hoặc prod
+  imagePullPolicy: Never # Never cho local Docker, Always/IfNotPresent cho Registry
+
+config:
+  dbHost: "10.1.117.193"
+  dbPort: "5432"
+  dbName: "billing_db"
+  dbUser: "postgres"
+  dbPass: "postgres"
+  kafkaServers: "host.docker.internal:9092"
+  redisHost: "10.1.117.193"
+  redisPort: "6379"
+
+worker:
+  name: billing-worker
+  replicaCount: 4
+  image:
+    repository: billing-worker
+    tag: latest
+  resources:
+    requests:
+      cpu: "4"
+      memory: "8Gi"
+    limits:
+      cpu: "8"
+      memory: "16Gi"
+  javaOpts: "-Xms8g -Xmx12g -XX:+UseG1GC -XX:MaxGCPauseMillis=100"
+  keda:
+    enabled: true
+    minReplicas: 4
+    maxReplicas: 32
+    lagThreshold: 1000
+
+orchestrator:
+  name: batch-orchestrator
+  replicaCount: 1
+  image:
+    repository: batch-orchestrator
+    tag: latest
+  resources:
+    requests:
+      cpu: "2"
+      memory: "4Gi"
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+
+mediation:
+  name: billing-mediation
+  replicaCount: 2
+  image:
+    repository: mediation-service
+    tag: latest
+  resources:
+    requests:
+      cpu: "2"
+      memory: "4Gi"
+    limits:
+      cpu: "4"
+      memory: "8Gi"
+
+cdc:
+  name: debezium-cdc
+  replicaCount: 2
+  image:
+    repository: debezium/connect
+    tag: "2.5"

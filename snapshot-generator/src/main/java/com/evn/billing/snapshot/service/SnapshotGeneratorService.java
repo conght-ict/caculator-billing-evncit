@@ -4,9 +4,12 @@ import com.evn.billing.common.domain.*;
 import com.evn.billing.common.dto.*;
 import com.evn.billing.snapshot.repository.*;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.math.BigDecimal;
@@ -34,64 +37,53 @@ public class SnapshotGeneratorService {
     private TariffRepository tariffRepository;
 
     @Autowired
-    private TariffDetailRepository tariffDetailRepository;
+    private DtuongQlyScheduleRepository dtuongQlyScheduleRepository;
+
+    @Autowired
+    private DiemDoScheduleRepository diemDoScheduleRepository;
+
+    @Autowired
+    private PendingSnapshotChangeRepository pendingSnapshotChangeRepository;
 
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
-    @Autowired
-    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+    @Value("${billing.snapshot.default-tariff:TARIFF_SHBT_2023}")
+    private String defaultTariffCode;
+
+    @Value("#{${billing.snapshot.grace-periods:{'R-01':3,'R-02':1,'R-03':3,'R-06':7,'R-08':5,'R-09':5,'R-11':7}}}")
+    private Map<String, Integer> gracePeriods;
 
     /**
      * Scans active accounts, builds static snapshot profiles based on database relational data
      * (topology tree & tariffs), saves them to the DB snapshot table, and syncs to Redis Cache.
      * 
-     * @param bookId The logical book partition ID
+     * @param dtuongQly The logical book partition ID
      * @param month The billing cycle month (YYYY_MM)
      */
     @Transactional
-    public void generateSnapshotsForBook(String bookId, String month, Integer period) {
-        List<Account> accounts = accountRepository.findByBookIdAndStatus(bookId, "ACTIVE");
+    public void generateSnapshotsForBook(String dtuongQly, String month, Integer period) {
+        List<Account> accounts = accountRepository.findByDtuongQlyAndStatus(dtuongQly, "ACTIVE");
         if (accounts.isEmpty()) {
             return;
         }
 
-        // Seed sample data for testing if tables are empty
-        seedSampleDataIfEmpty(bookId, accounts);
-
-        // Fetch all meter models in the database to map max_register_values
-        Map<String, BigDecimal> modelMaxRegisters = new HashMap<>();
-        try {
-            jdbcTemplate.query("SELECT model_code, max_register_value FROM meter_model", rs -> {
-                modelMaxRegisters.put(rs.getString(1), rs.getBigDecimal(2));
-            });
-        } catch (Exception e) {
-            log.warn("Failed to load meter models for topology mapping: {}", e.getMessage());
-        }
-
-        // Fetch target dates from book schedule
+        // Fetch target dates from book schedule (lich_ghi_dqly)
         LocalDate periodFromDate = LocalDate.now().withDayOfMonth(1);
         LocalDate periodToDate = LocalDate.now().withDayOfMonth(LocalDate.now().lengthOfMonth());
         try {
-            String scheduleSql = "SELECT from_date, to_date FROM book_billing_schedule WHERE book_id = ? AND billing_cycle_month = ? AND period = ?";
-            Map<String, Object> scheduleMap = jdbcTemplate.queryForMap(scheduleSql, bookId, month, period);
-            if (scheduleMap != null) {
-                Object fromObj = scheduleMap.get("from_date");
-                if (fromObj instanceof java.sql.Date) {
-                    periodFromDate = ((java.sql.Date) fromObj).toLocalDate();
-                } else if (fromObj instanceof LocalDate) {
-                    periodFromDate = (LocalDate) fromObj;
+            Optional<DtuongQlySchedule> scheduleOpt = dtuongQlyScheduleRepository.findByDtuongQlyAndThangCkAndKyChot(dtuongQly, month, period);
+            if (scheduleOpt.isPresent()) {
+                DtuongQlySchedule schedule = scheduleOpt.get();
+                if (schedule.getTuNgay() != null) {
+                    periodFromDate = schedule.getTuNgay();
                 }
-                
-                Object toObj = scheduleMap.get("to_date");
-                if (toObj instanceof java.sql.Date) {
-                    periodToDate = ((java.sql.Date) toObj).toLocalDate();
-                } else if (toObj instanceof LocalDate) {
-                    periodToDate = (LocalDate) toObj;
+                if (schedule.getDenNgay() != null) {
+                    periodToDate = schedule.getDenNgay();
                 }
             }
         } catch (Exception e) {
-            log.warn("No book schedule found for book: {}, month: {}, period: {}. Using default month bounds: {}", bookId, month, period, e.getMessage());
+            log.warn("No book schedule found for book: {}, month: {}, period: {}. Using default month bounds: {}", dtuongQly, month, period, e.getMessage());
             // Fallback parsing from YYYY_MM
             try {
                 String[] parts = month.split("_");
@@ -113,117 +105,256 @@ public class SnapshotGeneratorService {
         }
 
         List<BillingAccountSnapshot> snapshots = new ArrayList<>();
+        Map<String, BillingConfigSnapshot> cacheUpdates = new HashMap<>();
 
         for (Account account : accounts) {
-            BillingConfigSnapshot config = new BillingConfigSnapshot();
-            config.setAccountId(account.getAccountId());
-            config.setBookId(bookId);
-            config.setEffectiveSyncDate(LocalDate.now());
-            config.setPeriodFromDate(periodFromDate);
-            config.setPeriodToDate(periodToDate);
-            
-            // Set shared households normsFactor from Account entity
-            int normsFactor = account.getNormsFactor();
-            config.setNormsFactor(normsFactor);
-
-            // 1. Query meter points for the account
-            List<MeterPoint> meterPoints = meterPointRepository.findByAccountIdAndStatus(account.getAccountId(), "ACTIVE");
-            if (meterPoints.isEmpty()) {
+            // Check LOCKED snapshot state
+            if (checkLockedAndLogPending(account.getMaKhang(), month, period, "R-08", "lich_ghi_dqly", "tu_ngay")) {
                 continue;
             }
 
+            BillingConfigSnapshot config = new BillingConfigSnapshot();
+            config.setMaKhang(account.getMaKhang());
+            config.setDtuongQly(dtuongQly);
+            config.setTenKhang(account.getTenKhang());
+            config.setMaSoThue(account.getMaSoThue());
+            config.setDiaChi(account.getDiaChi());
+            config.setNgayHieuLuc(LocalDate.now());
+            config.setTuNgay(periodFromDate);
+            config.setDenNgay(periodToDate);
+
+            // 1. Query meter points for the account
+            List<MeterPoint> meterPoints = meterPointRepository.findByMaKhangAndStatus(account.getMaKhang(), "ACTIVE");
+            if (meterPoints.isEmpty()) {
+                continue;
+            }
+            config.setLoaiKhang(meterPoints.get(0).getLoaiKhang());
+
             // 2. Query relationships for the meter points
-            List<String> meterIds = meterPoints.stream().map(MeterPoint::getMeterPointId).toList();
+            List<String> meterIds = meterPoints.stream().map(MeterPoint::getMaDdo).toList();
             List<MeterRelation> relations = meterRelationRepository.findRelationsByMeterIds(meterIds);
 
-            // 3. Build Topology tree
-            MeterTopology topology = buildTopology(meterPoints, relations, modelMaxRegisters);
+            // 2.1 Extract pricing rules from MeterPoints (JSONB)
+            Map<String, List<PriceApplicationRule>> priceRulesByMeter = new HashMap<>();
+            int maxHouseholds = 1;
+            int totalConfigs = 0;
+            int sh100Configs = 0;
+            int nsh100Configs = 0;
+
+            for (MeterPoint mp : meterPoints) {
+                if (mp.getDanhSachApGia() != null) {
+                    for (TariffConfig tc : mp.getDanhSachApGia()) {
+                        PriceApplicationRule rule = new PriceApplicationRule();
+                        rule.setBbanId(mp.getMaDdo() + "_" + tc.getSoThuTu());
+                        rule.setMaDdo(mp.getMaDdo());
+                        rule.setSoThuTu(tc.getSoThuTu());
+                        rule.setDinhMuc(tc.getDinhMuc());
+                        rule.setLoaiDmuc(tc.getLoaiDmuc());
+                        rule.setLoaiBcs(tc.getTgianBdien());
+                        rule.setTgianBdien(tc.getTgianBdien());
+                        rule.setMaNgia(tc.getMaNgia());
+                        rule.setSoHo(tc.getSoHo());
+                        rule.setMaCapda(tc.getMaCapda());
+
+                        priceRulesByMeter.computeIfAbsent(mp.getMaDdo(), k -> new ArrayList<>()).add(rule);
+                        if (tc.getSoHo() > maxHouseholds) {
+                            maxHouseholds = tc.getSoHo();
+                        }
+
+                        totalConfigs++;
+                        String maNhomnn = tc.getMaNhomnn();
+                        String loaiDmuc = tc.getLoaiDmuc();
+                        BigDecimal dinhMuc = tc.getDinhMuc();
+
+                        boolean is100Percent = (loaiDmuc == null) || 
+                                (("TL".equals(loaiDmuc) || "%".equals(loaiDmuc)) && dinhMuc != null && dinhMuc.compareTo(BigDecimal.valueOf(100)) == 0);
+
+                        if (maNhomnn != null && maNhomnn.startsWith("SH") && is100Percent) {
+                            sh100Configs++;
+                        } else if ((maNhomnn == null || !maNhomnn.startsWith("SH")) && is100Percent) {
+                            nsh100Configs++;
+                        }
+                    }
+                }
+            }
+
+            String customerType = "MIXED";
+            if (totalConfigs > 0) {
+                if (sh100Configs == totalConfigs) {
+                    customerType = "SINH_HOAT";
+                } else if (nsh100Configs == totalConfigs) {
+                    customerType = "NGOAI_SINH_HOAT";
+                }
+            }
+            config.setCustomerType(customerType);
+            config.setNormsFactor(maxHouseholds);
+
+            // Sort rules for each meter by soThuTu (so_thu_tu)
+            for (List<PriceApplicationRule> rules : priceRulesByMeter.values()) {
+                rules.sort(Comparator.comparingInt(PriceApplicationRule::getSoThuTu));
+            }
+
+            // 3. Build Topology tree containing frozen price rules
+            MeterTopology topology = buildTopology(meterPoints, relations, priceRulesByMeter, month, period);
             config.setMeterTopology(topology);
 
-            // 4. Query and Map Tariffs
-            Map<String, TariffRules> tariffs = buildTariffs(meterPoints);
-            config.setTariffs(tariffs);
+            // 4. Query and Map Tariffs referenced in the pricing rules (using JSONB blocks)
+            Map<String, TariffRules> tariffs = buildTariffs(priceRulesByMeter);
+            config.setBieuGia(tariffs);
 
             // 4.1 Set Fast-Path flags
             boolean isFastPath = (meterPoints.size() == 1) && relations.isEmpty();
             config.setFastPathEnabled(isFastPath);
+            config.setHasRelation(!isFastPath);
+            config.setChangeFlags("NONE");
             if (isFastPath) {
-                config.setFastPathMeterPointId(meterPoints.get(0).getMeterPointId());
-                config.setFastPathTariffCode(meterPoints.get(0).getTariffCode());
+                String singleMeterId = meterPoints.get(0).getMaDdo();
+                config.setFastPathMaDdo(singleMeterId);
+                List<PriceApplicationRule> singleRules = priceRulesByMeter.getOrDefault(singleMeterId, Collections.emptyList());
+                if (singleRules.isEmpty()) {
+                    throw new IllegalStateException("No pricing rules found for single meter point: " + singleMeterId);
+                }
+                String fastTariff = singleRules.get(0).getMaNgia();
+                config.setFastPathMaNgia(fastTariff);
             }
 
             // Determine if main meter is stepping or flat
-            String mainTariffCode = isFastPath ? meterPoints.get(0).getTariffCode() : "TARIFF_SHBT_2023";
+            String mainTariffCode = null;
+            if (isFastPath) {
+                List<PriceApplicationRule> singleRules = priceRulesByMeter.getOrDefault(meterPoints.get(0).getMaDdo(), Collections.emptyList());
+                if (!singleRules.isEmpty()) {
+                    mainTariffCode = singleRules.get(0).getMaNgia();
+                }
+            } else {
+                // For complex multi-meter or mixed paths, resolve main tariff from root point
+                if (!topology.getRootPoints().isEmpty()) {
+                    mainTariffCode = topology.getRootPoints().get(0).getMaNgia();
+                }
+            }
+            if (mainTariffCode == null) {
+                throw new IllegalStateException("No main tariff code found for account: " + account.getMaKhang());
+            }
             TariffRules mainTariff = tariffs.get(mainTariffCode);
-            boolean isStepping = mainTariff == null || "STEPPING".equals(mainTariff.getType());
+            if (mainTariff == null) {
+                throw new IllegalStateException("Missing tariff configuration details for code: " + mainTariffCode);
+            }
+            boolean isStepping = "STEPPING".equals(mainTariff.getLoaiBieuGia());
 
             // 4.2 Populate default billing schema steps
             config.setSchemaSteps(buildDefaultSchemaSteps(isStepping));
+            config.setMaDviqly(account.getMaDviqly());
 
             // 5. Create Entity Snapshot
             BillingAccountSnapshot snapshot = new BillingAccountSnapshot();
-            String snapshotId = account.getAccountId() + "_" + month + "_p" + period + "_v1";
-            snapshot.setSnapshotId(snapshotId);
-            snapshot.setAccountId(account.getAccountId());
-            snapshot.setBookId(bookId);
-            snapshot.setBillingCycleMonth(month);
-            snapshot.setPeriod(period);
-            snapshot.setCalculationVersion(1);
-            snapshot.setEffectiveSyncDate(LocalDate.now());
-            snapshot.setConfigData(config);
+            String snapshotId = account.getMaKhang() + "_" + month + "_p" + period + "_v1";
+            snapshot.setIdSnapshot(snapshotId);
+            snapshot.setMaKhang(account.getMaKhang());
+            snapshot.setDtuongQly(dtuongQly);
+            snapshot.setThangChuKy(month);
+            snapshot.setKyChot(period);
+            snapshot.setPhienBanTinh(1);
+            snapshot.setNgayDongBoHieuLuc(LocalDate.now());
+            snapshot.setMaDviqly(account.getMaDviqly());
+            snapshot.setDuLieuCauHinh(config);
             snapshot.setCreatedAt(LocalDateTime.now());
 
             snapshots.add(snapshot);
 
-            // 6. Synchronize to Redis Cache (TTL = 24 hours)
-            String cacheKey = "snapshot:" + account.getAccountId() + ":" + month + ":" + period;
-            try {
-                redisTemplate.opsForValue().set(cacheKey, config, 24, TimeUnit.HOURS);
-            } catch (Exception e) {
-                log.warn("Failed to cache snapshot in Redis: {}", e.getMessage());
-            }
+            // Stage Redis update and execute only after DB commit.
+            String cacheKey = "snapshot:" + account.getMaKhang() + ":" + month + ":" + period;
+            cacheUpdates.put(cacheKey, config);
         }
 
         snapshotRepository.saveAll(snapshots);
+
+        if (!cacheUpdates.isEmpty()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    for (Map.Entry<String, BillingConfigSnapshot> entry : cacheUpdates.entrySet()) {
+                        try {
+                            redisTemplate.opsForValue().set(entry.getKey(), entry.getValue(), 24, TimeUnit.HOURS);
+                        } catch (Exception e) {
+                            log.warn("Failed to cache snapshot in Redis: {}", e.getMessage());
+                        }
+                    }
+                }
+            });
+        }
     }
 
     /**
-     * Builds hierarchical topology tree from flat database rows.
+     * Builds hierarchical topology tree from flat database rows and binds price rules.
      */
-    private MeterTopology buildTopology(List<MeterPoint> meterPoints, List<MeterRelation> relations, Map<String, BigDecimal> maxRegisters) {
+    private MeterTopology buildTopology(List<MeterPoint> meterPoints, List<MeterRelation> relations, Map<String, List<PriceApplicationRule>> priceRulesByMeter, String month, Integer period) {
         Map<String, MeterPointNode> nodeMap = new HashMap<>();
         
         // Initialize all nodes
         for (MeterPoint mp : meterPoints) {
             MeterPointNode node = new MeterPointNode();
-            node.setMeterPointId(mp.getMeterPointId());
-            node.setTariffCode(mp.getTariffCode());
-            node.setMeterSerial(mp.getMeterSerial());
-            node.setMaxRegisterValue(maxRegisters.getOrDefault(mp.getModelCode(), new BigDecimal("99999.9")));
+            node.setMaDdo(mp.getMaDdo());
+            String serial = "";
+            if (mp.getMeterDetailsList() != null && !mp.getMeterDetailsList().isEmpty()) {
+                serial = mp.getMeterDetailsList().stream()
+                    .filter(m -> "ACTIVE".equals(m.getTrangThai()))
+                    .map(MeterDetails::getSoSeri)
+                    .findFirst()
+                    .orElse(mp.getMeterDetailsList().get(0).getSoSeri());
+            }
+            node.setMeterSerial(serial);
+            
+            List<PriceApplicationRule> rules = priceRulesByMeter.getOrDefault(mp.getMaDdo(), Collections.emptyList());
+            if (rules.isEmpty()) {
+                throw new IllegalStateException("No pricing rules config mapped for meter point: " + mp.getMaDdo());
+            }
+            node.setPriceRules(rules);
+            node.setMaNgia(rules.get(0).getMaNgia());
+
             node.setChildPoints(new ArrayList<>());
             node.setCalculationType(CalculationType.AGGREGATION);
-            nodeMap.put(mp.getMeterPointId(), node);
+            node.setActiveMeters(mp.getMeterDetailsList());
+            node.setLoaiDdo(mp.getLoaiDdo());
+            node.setIsDienMt(mp.getIsDienMt());
+
+            // Prioritize meter point schedule (lich_ghi_ddo)
+            try {
+                Optional<DiemDoSchedule> ddoScheduleOpt = diemDoScheduleRepository.findByMaDdoAndThangCkAndKyChot(mp.getMaDdo(), month, period);
+                if (ddoScheduleOpt.isPresent()) {
+                    DiemDoSchedule schedule = ddoScheduleOpt.get();
+                    if (schedule.getTuNgay() != null) {
+                        node.setTuNgay(schedule.getTuNgay());
+                    }
+                    if (schedule.getDenNgay() != null) {
+                        node.setDenNgay(schedule.getDenNgay());
+                    }
+                }
+            } catch (Exception e) {
+                node.setTuNgay(null);
+                node.setDenNgay(null);
+            }
+
+            nodeMap.put(mp.getMaDdo(), node);
         }
 
         Set<String> childNodeIds = new HashSet<>();
         
         // Build parent-child links
         for (MeterRelation rel : relations) {
-            MeterPointNode parent = nodeMap.get(rel.getParentId());
-            MeterPointNode child = nodeMap.get(rel.getChildId());
+            MeterPointNode parent = nodeMap.get(rel.getMaDdoCha());
+            MeterPointNode child = nodeMap.get(rel.getMaDdoCon());
             
             if (parent != null && child != null) {
-                child.setCalculationType(CalculationType.valueOf(rel.getRelationType()));
+                child.setCalculationType(CalculationType.valueOf(rel.getLoaiQuanHe()));
                 parent.getChildPoints().add(child);
-                childNodeIds.add(child.getMeterPointId());
+                childNodeIds.add(child.getMaDdo());
             }
         }
 
         // Roots are nodes that are NOT children of any other node
         List<MeterPointNode> rootPoints = new ArrayList<>();
         for (MeterPoint mp : meterPoints) {
-            if (!childNodeIds.contains(mp.getMeterPointId())) {
-                MeterPointNode root = nodeMap.get(mp.getMeterPointId());
+            if (!childNodeIds.contains(mp.getMaDdo())) {
+                MeterPointNode root = nodeMap.get(mp.getMaDdo());
                 if (root != null) {
                     rootPoints.add(root);
                 }
@@ -236,133 +367,50 @@ public class SnapshotGeneratorService {
     }
 
     /**
-     * Builds TariffRules configurations for active meter points.
+     * Builds TariffRules configurations for active tariffs referenced in the pricing rules.
      */
-    private Map<String, TariffRules> buildTariffs(List<MeterPoint> meterPoints) {
-        List<String> tariffCodes = meterPoints.stream()
-                .map(MeterPoint::getTariffCode)
+    private Map<String, TariffRules> buildTariffs(Map<String, List<PriceApplicationRule>> priceRulesByMeter) {
+        List<String> tariffCodes = priceRulesByMeter.values().stream()
+                .flatMap(Collection::stream)
+                .map(PriceApplicationRule::getMaNgia)
                 .filter(Objects::nonNull)
                 .distinct()
                 .toList();
 
         if (tariffCodes.isEmpty()) {
-            return Collections.emptyMap();
+            throw new IllegalStateException("No tariff code mapped from price application rules.");
         }
 
         List<Tariff> tariffsDb = tariffRepository.findAllById(tariffCodes);
-        List<TariffDetail> detailsDb = tariffDetailRepository.findByTariffCodeIn(tariffCodes);
+        LocalDate now = LocalDate.now();
+        // Lọc biểu giá hoạt động và không hết hạn
+        tariffsDb = tariffsDb.stream()
+                .filter(t -> "ACTIVE".equals(t.getTrangThai()))
+                .filter(t -> t.getNgayHieuLuc() == null || !t.getNgayHieuLuc().isAfter(now))
+                .filter(t -> t.getNgayHetHan() == null || !t.getNgayHetHan().isBefore(now))
+                .toList();
 
-        // Group details by tariff code
-        Map<String, List<TariffDetail>> detailsMap = new HashMap<>();
-        for (TariffDetail detail : detailsDb) {
-            detailsMap.computeIfAbsent(detail.getTariffCode(), k -> new ArrayList<>()).add(detail);
+        Set<String> foundTariffCodes = tariffsDb.stream().map(Tariff::getMaNgia).collect(java.util.stream.Collectors.toSet());
+        List<String> missingTariffCodes = tariffCodes.stream().filter(code -> !foundTariffCodes.contains(code)).toList();
+        if (!missingTariffCodes.isEmpty()) {
+            throw new IllegalStateException("Missing tariff master data or expired for codes: " + missingTariffCodes);
         }
 
         Map<String, TariffRules> tariffs = new HashMap<>();
         for (Tariff t : tariffsDb) {
             TariffRules rules = new TariffRules();
-            rules.setTariffCode(t.getTariffCode());
-            rules.setType(t.getType());
-            rules.setEffectiveDate(t.getEffectiveDate());
-            rules.setExpiryDate(t.getExpiryDate());
-
-            List<TariffBlock> blocks = new ArrayList<>();
-            List<TariffDetail> details = detailsMap.getOrDefault(t.getTariffCode(), Collections.emptyList());
-            
-            // Sort by step ascending
-            List<TariffDetail> sortedDetails = new ArrayList<>(details);
-            sortedDetails.sort(Comparator.comparing(TariffDetail::getStep));
-
-            for (TariffDetail d : sortedDetails) {
-                TariffBlock block = new TariffBlock();
-                block.setStep(d.getStep());
-                block.setMinKwh(d.getMinKwh().doubleValue());
-                block.setMaxKwh(d.getMaxKwh() != null ? d.getMaxKwh().doubleValue() : null);
-                block.setUnitPrice(d.getUnitPrice().doubleValue());
-                block.setTouPeriod(d.getTouPeriod());
-                blocks.add(block);
-            }
-            rules.setBlocks(blocks);
-            tariffs.put(t.getTariffCode(), rules);
+            rules.setMaNgia(t.getMaNgia());
+            rules.setLoaiBieuGia(t.getLoaiBieuGia());
+            rules.setNgayHieuLuc(t.getNgayHieuLuc());
+            rules.setNgayHetHan(t.getNgayHetHan());
+            rules.setBlocks(t.getBlocks() != null ? t.getBlocks() : new ArrayList<>());
+            tariffs.put(t.getMaNgia(), rules);
         }
 
         return tariffs;
     }
 
-    /**
-     * Seeds mock tariff and meter relations when database tables are blank.
-     */
-    private void seedSampleDataIfEmpty(String bookId, List<Account> accounts) {
-        if (tariffRepository.count() == 0) {
-            Tariff t1 = new Tariff();
-            t1.setTariffCode("TARIFF_SHBT_2023");
-            t1.setName("Sinh hoạt bậc thang");
-            t1.setType("STEPPING");
-            t1.setEffectiveDate(LocalDate.of(2023, 5, 4));
-            tariffRepository.save(t1);
 
-            List<TariffDetail> details = new ArrayList<>();
-            details.add(createDetail("TARIFF_SHBT_2023", 1, 0.0, 50.0, 1806.0));
-            details.add(createDetail("TARIFF_SHBT_2023", 2, 50.0, 100.0, 1866.0));
-            details.add(createDetail("TARIFF_SHBT_2023", 3, 100.0, 200.0, 2167.0));
-            details.add(createDetail("TARIFF_SHBT_2023", 4, 200.0, 300.0, 2729.0));
-            details.add(createDetail("TARIFF_SHBT_2023", 5, 300.0, 400.0, 3050.0));
-            details.add(createDetail("TARIFF_SHBT_2023", 6, 400.0, null, 3157.0));
-            tariffDetailRepository.saveAll(details);
-
-            Tariff t2 = new Tariff();
-            t2.setTariffCode("TARIFF_KDOANH_2023");
-            t2.setName("Kinh doanh đồng giá");
-            t2.setType("FLAT");
-            t2.setEffectiveDate(LocalDate.of(2023, 5, 4));
-            tariffRepository.save(t2);
-
-            TariffDetail d2 = createDetail("TARIFF_KDOANH_2023", 1, 0.0, null, 2500.0);
-            tariffDetailRepository.save(d2);
-        }
-
-        for (Account account : accounts) {
-            List<MeterPoint> points = meterPointRepository.findByAccountIdAndStatus(account.getAccountId(), "ACTIVE");
-            if (points.isEmpty()) {
-                MeterPoint mp1 = new MeterPoint();
-                mp1.setMeterPointId("METER-TONG-" + account.getAccountId());
-                mp1.setAccountId(account.getAccountId());
-                mp1.setTariffCode("TARIFF_SHBT_2023");
-                mp1.setStatus("ACTIVE");
-                mp1.setModelCode("MODEL_SMART_AMI");
-                mp1.setMeterSerial("SN-TONG-" + account.getAccountId());
-                mp1.setInstalledDate(LocalDate.of(2025, 1, 1));
-                meterPointRepository.save(mp1);
-
-                MeterPoint mp2 = new MeterPoint();
-                mp2.setMeterPointId("METER-PHU-" + account.getAccountId());
-                mp2.setAccountId(account.getAccountId());
-                mp2.setTariffCode("TARIFF_KDOANH_2023");
-                mp2.setStatus("ACTIVE");
-                mp2.setModelCode("MODEL_ELEC_5D");
-                mp2.setMeterSerial("SN-PHU-" + account.getAccountId());
-                mp2.setInstalledDate(LocalDate.of(2025, 1, 1));
-                meterPointRepository.save(mp2);
-
-                MeterRelation rel = new MeterRelation();
-                rel.setParentId(mp1.getMeterPointId());
-                rel.setChildId(mp2.getMeterPointId());
-                rel.setRelationType("NETTING");
-                rel.setEffectiveFrom(LocalDate.of(2025, 1, 1));
-                meterRelationRepository.save(rel);
-            }
-        }
-    }
-
-    private TariffDetail createDetail(String code, int step, double min, Double max, double price) {
-        TariffDetail d = new TariffDetail();
-        d.setTariffCode(code);
-        d.setStep(step);
-        d.setMinKwh(BigDecimal.valueOf(min));
-        d.setMaxKwh(max != null ? BigDecimal.valueOf(max) : null);
-        d.setUnitPrice(BigDecimal.valueOf(price));
-        return d;
-    }
 
     private List<BillingSchemaStep> buildDefaultSchemaSteps(boolean isStepping) {
         List<BillingSchemaStep> steps = new ArrayList<>();
@@ -379,7 +427,7 @@ public class SnapshotGeneratorService {
 
         Map<String, String> outputs = new HashMap<>();
         outputs.put("amount", "BASE_AMOUNT");
-        outputs.put("breakdown", "RATING_BREAKDOWN");
+        outputs.put("breakdown", "BILL_STEP_DETAILS");
         ratingStep.setOutputOperands(outputs);
         
         ratingStep.setStepConfig(new HashMap<>());
@@ -400,10 +448,283 @@ public class SnapshotGeneratorService {
         taxStep.setOutputOperands(taxOutputs);
 
         Map<String, Object> taxConfig = new HashMap<>();
-        taxConfig.put("taxRate", 0.10);
+        taxConfig.put("taxRate", 0.08);
         taxStep.setStepConfig(taxConfig);
         steps.add(taxStep);
 
         return steps;
+    }
+
+    @Transactional
+    public void generateSnapshotForAccount(String accountId, String month, Integer period) {
+        generateSnapshotForAccount(accountId, month, period, "R-01", "diem_do", "danh_sach_ap_gia");
+    }
+
+    @Transactional
+    public void generateSnapshotForAccount(String accountId, String month, Integer period, String ruleId, String bangNguon, String truongThayDoi) {
+        if (checkLockedAndLogPending(accountId, month, period, ruleId, bangNguon, truongThayDoi)) {
+            return;
+        }
+
+        Account account = accountRepository.findById(accountId).orElse(null);
+        if (account == null) {
+            log.warn("Account not found for snapshot generation: {}", accountId);
+            return;
+        }
+
+        List<MeterPoint> meterPoints = meterPointRepository.findByMaKhangAndStatus(account.getMaKhang(), "ACTIVE");
+        if (meterPoints.isEmpty()) {
+            return;
+        }
+        String dtuongQly = meterPoints.get(0).getDtuongQly();
+
+        LocalDate periodFromDate = LocalDate.now().withDayOfMonth(1);
+        LocalDate periodToDate = LocalDate.now().withDayOfMonth(LocalDate.now().lengthOfMonth());
+        try {
+            Optional<DtuongQlySchedule> scheduleOpt = dtuongQlyScheduleRepository.findByDtuongQlyAndThangCkAndKyChot(dtuongQly, month, period);
+            if (scheduleOpt.isPresent()) {
+                DtuongQlySchedule schedule = scheduleOpt.get();
+                if (schedule.getTuNgay() != null) {
+                    periodFromDate = schedule.getTuNgay();
+                }
+                if (schedule.getDenNgay() != null) {
+                    periodToDate = schedule.getDenNgay();
+                }
+            }
+        } catch (Exception e) {
+            log.warn("No book schedule found for account: {}, month: {}, period: {}. Using default month bounds: {}", accountId, month, period, e.getMessage());
+            try {
+                String[] parts = month.split("_");
+                int year = Integer.parseInt(parts[0]);
+                int monthVal = Integer.parseInt(parts[1]);
+                if (period == 1) {
+                    periodFromDate = LocalDate.of(year, monthVal, 1);
+                    periodToDate = LocalDate.of(year, monthVal, 10);
+                } else if (period == 2) {
+                    periodFromDate = LocalDate.of(year, monthVal, 11);
+                    periodToDate = LocalDate.of(year, monthVal, 20);
+                } else {
+                    periodFromDate = LocalDate.of(year, monthVal, 21);
+                    periodToDate = LocalDate.of(year, monthVal, java.time.YearMonth.of(year, monthVal).lengthOfMonth());
+                }
+            } catch (Exception ex) {
+                // Keep default
+            }
+        }
+
+        BillingConfigSnapshot config = new BillingConfigSnapshot();
+        config.setMaKhang(account.getMaKhang());
+        config.setDtuongQly(dtuongQly);
+        config.setTenKhang(account.getTenKhang());
+        config.setMaSoThue(account.getMaSoThue());
+        config.setDiaChi(account.getDiaChi());
+        config.setNgayHieuLuc(LocalDate.now());
+        config.setTuNgay(periodFromDate);
+        config.setDenNgay(periodToDate);
+
+
+        config.setLoaiKhang(meterPoints.get(0).getLoaiKhang());
+
+        List<String> meterIds = meterPoints.stream().map(MeterPoint::getMaDdo).toList();
+        List<MeterRelation> relations = meterRelationRepository.findRelationsByMeterIds(meterIds);
+
+        Map<String, List<PriceApplicationRule>> priceRulesByMeter = new HashMap<>();
+        int maxHouseholds = 1;
+        int totalConfigs = 0;
+        int sh100Configs = 0;
+        int nsh100Configs = 0;
+
+        for (MeterPoint mp : meterPoints) {
+            if (mp.getDanhSachApGia() != null) {
+                for (TariffConfig tc : mp.getDanhSachApGia()) {
+                    PriceApplicationRule rule = new PriceApplicationRule();
+                    rule.setBbanId(mp.getMaDdo() + "_" + tc.getSoThuTu());
+                    rule.setMaDdo(mp.getMaDdo());
+                    rule.setSoThuTu(tc.getSoThuTu());
+                    rule.setDinhMuc(tc.getDinhMuc());
+                    rule.setLoaiDmuc(tc.getLoaiDmuc());
+                    rule.setLoaiBcs(tc.getTgianBdien());
+                    rule.setTgianBdien(tc.getTgianBdien());
+                    rule.setMaNgia(tc.getMaNgia());
+                    rule.setSoHo(tc.getSoHo());
+                    rule.setMaCapda(tc.getMaCapda());
+
+                    priceRulesByMeter.computeIfAbsent(mp.getMaDdo(), k -> new ArrayList<>()).add(rule);
+                    if (tc.getSoHo() > maxHouseholds) {
+                        maxHouseholds = tc.getSoHo();
+                    }
+
+                    totalConfigs++;
+                    String maNhomnn = tc.getMaNhomnn();
+                    String loaiDmuc = tc.getLoaiDmuc();
+                    BigDecimal dinhMuc = tc.getDinhMuc();
+
+                    boolean is100Percent = (loaiDmuc == null) || 
+                            (("TL".equals(loaiDmuc) || "%".equals(loaiDmuc)) && dinhMuc != null && dinhMuc.compareTo(BigDecimal.valueOf(100)) == 0);
+
+                    if (maNhomnn != null && maNhomnn.startsWith("SH") && is100Percent) {
+                        sh100Configs++;
+                    } else if ((maNhomnn == null || !maNhomnn.startsWith("SH")) && is100Percent) {
+                        nsh100Configs++;
+                    }
+                }
+            }
+        }
+
+        String customerType = "MIXED";
+        if (totalConfigs > 0) {
+            if (sh100Configs == totalConfigs) {
+                customerType = "SINH_HOAT";
+            } else if (nsh100Configs == totalConfigs) {
+                customerType = "NGOAI_SINH_HOAT";
+            }
+        }
+        config.setCustomerType(customerType);
+        config.setNormsFactor(maxHouseholds);
+
+        for (List<PriceApplicationRule> rules : priceRulesByMeter.values()) {
+            rules.sort(Comparator.comparingInt(PriceApplicationRule::getSoThuTu));
+        }
+
+        MeterTopology topology = buildTopology(meterPoints, relations, priceRulesByMeter, month, period);
+        config.setMeterTopology(topology);
+
+        Map<String, TariffRules> tariffs = buildTariffs(priceRulesByMeter);
+        config.setBieuGia(tariffs);
+
+        boolean isFastPath = (meterPoints.size() == 1) && relations.isEmpty();
+        config.setFastPathEnabled(isFastPath);
+        config.setHasRelation(!isFastPath);
+        if (isFastPath) {
+            String singleMeterId = meterPoints.get(0).getMaDdo();
+            config.setFastPathMaDdo(singleMeterId);
+            List<PriceApplicationRule> singleRules = priceRulesByMeter.getOrDefault(singleMeterId, Collections.emptyList());
+            if (singleRules.isEmpty()) {
+                throw new IllegalStateException("No pricing rules found for single meter point: " + singleMeterId);
+            }
+            String fastTariff = singleRules.get(0).getMaNgia();
+            config.setFastPathMaNgia(fastTariff);
+        }
+
+        String mainTariffCode = null;
+        if (isFastPath) {
+            List<PriceApplicationRule> singleRules = priceRulesByMeter.getOrDefault(meterPoints.get(0).getMaDdo(), Collections.emptyList());
+            if (!singleRules.isEmpty()) {
+                mainTariffCode = singleRules.get(0).getMaNgia();
+            }
+        } else {
+            if (!topology.getRootPoints().isEmpty()) {
+                mainTariffCode = topology.getRootPoints().get(0).getMaNgia();
+            }
+        }
+        if (mainTariffCode == null) {
+            throw new IllegalStateException("No main tariff code found for account: " + accountId);
+        }
+        TariffRules mainTariff = tariffs.get(mainTariffCode);
+        if (mainTariff == null) {
+            throw new IllegalStateException("Missing tariff configuration details for code: " + mainTariffCode);
+        }
+        boolean isStepping = "STEPPING".equals(mainTariff.getLoaiBieuGia());
+
+        config.setSchemaSteps(buildDefaultSchemaSteps(isStepping));
+        config.setMaDviqly(account.getMaDviqly());
+
+        Optional<BillingAccountSnapshot> oldSnapOpt = snapshotRepository.findByMaKhangAndThangChuKyAndKyChot(account.getMaKhang(), month, period);
+        String changeFlags = "NONE";
+        if (oldSnapOpt.isPresent()) {
+            BillingConfigSnapshot oldConfig = oldSnapOpt.get().getDuLieuCauHinh();
+            changeFlags = determineChangeFlags(oldConfig, config);
+        }
+        config.setChangeFlags(changeFlags);
+
+        BillingAccountSnapshot snapshot = new BillingAccountSnapshot();
+        String snapshotId = account.getMaKhang() + "_" + month + "_p" + period + "_v1";
+        snapshot.setIdSnapshot(snapshotId);
+        snapshot.setMaKhang(account.getMaKhang());
+        snapshot.setDtuongQly(dtuongQly);
+        snapshot.setThangChuKy(month);
+        snapshot.setKyChot(period);
+        snapshot.setPhienBanTinh(1);
+        snapshot.setNgayDongBoHieuLuc(LocalDate.now());
+        snapshot.setMaDviqly(account.getMaDviqly());
+        snapshot.setDuLieuCauHinh(config);
+        snapshot.setCreatedAt(LocalDateTime.now());
+
+        snapshotRepository.save(snapshot);
+
+        String cacheKey = "snapshot:" + account.getMaKhang() + ":" + month + ":" + period;
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    redisTemplate.opsForValue().set(cacheKey, config, 24, TimeUnit.HOURS);
+                    log.info("Successfully regenerated and cached snapshot for account: {}", accountId);
+                } catch (Exception e) {
+                    log.warn("Failed to cache snapshot in Redis for account: {}", accountId, e);
+                }
+            }
+        });
+    }
+
+    private boolean checkLockedAndLogPending(String accountId, String month, Integer period, String ruleId, String bangNguon, String truongThayDoi) {
+        try {
+            Optional<BillingAccountSnapshot> snapOpt = snapshotRepository.findByMaKhangAndThangChuKyAndKyChot(accountId, month, period);
+            if (snapOpt.isPresent() && "LOCKED".equalsIgnoreCase(snapOpt.get().getTrangThai())) {
+                log.info("[SNAP-LOCKED] Snapshot for account: {}, month: {}, period: {} is LOCKED. Logging pending change.", accountId, month, period);
+                
+                PendingSnapshotChange pending = new PendingSnapshotChange();
+                pending.setMaKhang(accountId);
+                pending.setThangChuKy(month);
+                pending.setKyChot(period);
+                pending.setRuleId(ruleId);
+                pending.setBangNguon(bangNguon);
+                pending.setTruongThayDoi(truongThayDoi);
+                pending.setGraceExpiresAt(LocalDateTime.now().plusDays(getGracePeriodDays(ruleId)));
+                pending.setTrangThai("PENDING");
+                
+                pendingSnapshotChangeRepository.save(pending);
+                return true; // Is LOCKED
+            }
+        } catch (Exception e) {
+            log.error("Error checking LOCKED snapshot state", e);
+        }
+        return false;
+    }
+
+    private int getGracePeriodDays(String ruleId) {
+        if (gracePeriods != null && gracePeriods.containsKey(ruleId)) {
+            return gracePeriods.get(ruleId);
+        }
+        return 7;
+    }
+
+    private String determineChangeFlags(BillingConfigSnapshot oldConfig, BillingConfigSnapshot newConfig) {
+        if (oldConfig == null) {
+            return "NONE";
+        }
+        boolean priceChanged = false;
+        boolean meterChanged = false;
+
+        // 1. Compare Tariffs and House Norms Factor and Customer Type
+        if (!Objects.equals(oldConfig.getBieuGia(), newConfig.getBieuGia())
+                || oldConfig.getNormsFactor() != newConfig.getNormsFactor()
+                || !Objects.equals(oldConfig.getCustomerType(), newConfig.getCustomerType())) {
+            priceChanged = true;
+        }
+
+        // 2. Compare Topology and relationship structural changes
+        if (!Objects.equals(oldConfig.getMeterTopology(), newConfig.getMeterTopology())
+                || oldConfig.isHasRelation() != newConfig.isHasRelation()) {
+            meterChanged = true;
+        }
+
+        if (priceChanged && meterChanged) {
+            return "MULTI_CHANGE";
+        } else if (priceChanged) {
+            return "PRICE_CHANGE";
+        } else if (meterChanged) {
+            return "METER_CHANGE";
+        }
+        return oldConfig.getChangeFlags() != null ? oldConfig.getChangeFlags() : "NONE";
     }
 }

@@ -27,27 +27,27 @@ public class RatingEngineTest {
         standardBlocks = new ArrayList<>();
         
         TariffBlock b1 = new TariffBlock();
-        b1.setStep(1); b1.setMinKwh(0); b1.setMaxKwh(50.0); b1.setUnitPrice(1806);
+        b1.setSoThuTu(1); b1.setMinKwh(BigDecimal.ZERO); b1.setMaxKwh(BigDecimal.valueOf(50.0)); b1.setDonGia(BigDecimal.valueOf(1806));
         standardBlocks.add(b1);
 
         TariffBlock b2 = new TariffBlock();
-        b2.setStep(2); b2.setMinKwh(50.0); b2.setMaxKwh(100.0); b2.setUnitPrice(1866);
+        b2.setSoThuTu(2); b2.setMinKwh(BigDecimal.valueOf(50.0)); b2.setMaxKwh(BigDecimal.valueOf(100.0)); b2.setDonGia(BigDecimal.valueOf(1866));
         standardBlocks.add(b2);
 
         TariffBlock b3 = new TariffBlock();
-        b3.setStep(3); b3.setMinKwh(100.0); b3.setMaxKwh(200.0); b3.setUnitPrice(2167);
+        b3.setSoThuTu(3); b3.setMinKwh(BigDecimal.valueOf(100.0)); b3.setMaxKwh(BigDecimal.valueOf(200.0)); b3.setDonGia(BigDecimal.valueOf(2167));
         standardBlocks.add(b3);
 
         TariffBlock b4 = new TariffBlock();
-        b4.setStep(4); b4.setMinKwh(200.0); b4.setMaxKwh(300.0); b4.setUnitPrice(2729);
+        b4.setSoThuTu(4); b4.setMinKwh(BigDecimal.valueOf(200.0)); b4.setMaxKwh(BigDecimal.valueOf(300.0)); b4.setDonGia(BigDecimal.valueOf(2729));
         standardBlocks.add(b4);
 
         TariffBlock b5 = new TariffBlock();
-        b5.setStep(5); b5.setMinKwh(300.0); b5.setMaxKwh(400.0); b5.setUnitPrice(3050);
+        b5.setSoThuTu(5); b5.setMinKwh(BigDecimal.valueOf(300.0)); b5.setMaxKwh(BigDecimal.valueOf(400.0)); b5.setDonGia(BigDecimal.valueOf(3050));
         standardBlocks.add(b5);
 
         TariffBlock b6 = new TariffBlock();
-        b6.setStep(6); b6.setMinKwh(400.0); b6.setMaxKwh(null); b6.setUnitPrice(3157);
+        b6.setSoThuTu(6); b6.setMinKwh(BigDecimal.valueOf(400.0)); b6.setMaxKwh(null); b6.setDonGia(BigDecimal.valueOf(3157));
         standardBlocks.add(b6);
     }
 
@@ -55,11 +55,11 @@ public class RatingEngineTest {
     public void testTopologyCalculationWithNetting() {
         // Construct topology: Root (METER-01) netting Child (METER-02)
         MeterPointNode root = new MeterPointNode();
-        root.setMeterPointId("METER-01");
+        root.setMaDdo("METER-01");
         root.setCalculationType(CalculationType.AGGREGATION);
 
         MeterPointNode child = new MeterPointNode();
-        child.setMeterPointId("METER-02");
+        child.setMaDdo("METER-02");
         child.setCalculationType(CalculationType.NETTING);
 
         root.setChildPoints(List.of(child));
@@ -157,5 +157,130 @@ public class RatingEngineTest {
         // Tier 4: 25 kWh * 2729 = 68,225
         assertEquals(25.0, results.get(3).getKwhConsumed().doubleValue());
         assertEquals(68225.0, results.get(3).getAmount().doubleValue());
+    }
+
+    @Test
+    public void testCustomerClassificationCases() throws Exception {
+        BillingCalculator calculator = new BillingCalculator();
+
+        // 1. Setup default tariffs map
+        Map<String, com.evn.billing.common.dto.TariffRules> tariffs = new HashMap<>();
+        
+        com.evn.billing.common.dto.TariffRules shbtRules = new com.evn.billing.common.dto.TariffRules();
+        shbtRules.setMaNgia("TARIFF_SHBT_2023");
+        shbtRules.setLoaiBieuGia("STEPPING");
+        shbtRules.setBlocks(standardBlocks);
+        tariffs.put("TARIFF_SHBT_2023", shbtRules);
+
+        com.evn.billing.common.dto.TariffRules flatRules = new com.evn.billing.common.dto.TariffRules();
+        flatRules.setMaNgia("TARIFF_NGOAI_SH");
+        flatRules.setLoaiBieuGia("FLAT");
+        TariffBlock flatBlock = new TariffBlock();
+        flatBlock.setSoThuTu(1); flatBlock.setMinKwh(BigDecimal.ZERO); flatBlock.setMaxKwh(null); flatBlock.setDonGia(BigDecimal.valueOf(2500));
+        flatRules.setBlocks(List.of(flatBlock));
+        tariffs.put("TARIFF_NGOAI_SH", flatRules);
+
+        // Standard Schema Steps (STEP_RATING & FLAT_RATING)
+        List<com.evn.billing.common.dto.BillingSchemaStep> schemaSteps = new ArrayList<>();
+        com.evn.billing.common.dto.BillingSchemaStep ratingStep = new com.evn.billing.common.dto.BillingSchemaStep();
+        ratingStep.setStepNumber(10);
+        ratingStep.setVariantName("STEP_RATING");
+        ratingStep.setInputOperands(Map.of("consumption", "NET_KWH", "tariffCode", "FAST_TARIFF_CODE", "norms", "NORMS_FACTOR", "proRata", "PRO_RATA_FACTOR"));
+        ratingStep.setOutputOperands(Map.of("amount", "AMOUNT_OUT", "breakdown", "BREAKDOWN_OUT"));
+        schemaSteps.add(ratingStep);
+
+        // 2. Case 1: SINH_HOAT_DU_DINH_MUC
+        com.evn.billing.common.dto.BillingConfigSnapshot config1 = new com.evn.billing.common.dto.BillingConfigSnapshot();
+        config1.setMaKhang("KH-01");
+        config1.setNormsFactor(1);
+        config1.setCustomerType("SINH_HOAT");
+        config1.setBieuGia(tariffs);
+        config1.setSchemaSteps(schemaSteps);
+
+        com.evn.billing.common.dto.MeterTopology topology1 = new com.evn.billing.common.dto.MeterTopology();
+        MeterPointNode node1 = new MeterPointNode();
+        node1.setMaDdo("MP-01");
+        node1.setCalculationType(CalculationType.AGGREGATION);
+        node1.setMaNgia("TARIFF_SHBT_2023");
+        topology1.setRootPoints(List.of(node1));
+        config1.setMeterTopology(topology1);
+
+        Map<String, BigDecimal> cons1 = Map.of("MP-01", BigDecimal.valueOf(350));
+        CalculationResult res1 = calculator.calculate(config1, cons1, "2026_06", 30);
+        Map<String, Object> br1 = (Map<String, Object>) res1.getMeterPointBreakdowns().get("MP-01");
+        assertEquals("SINH_HOAT_DU_DINH_MUC", br1.get("customer_case"));
+
+        // 3. Case 2: SINH_HOAT_THIEU_DINH_MUC (Short prorated days)
+        CalculationResult res2 = calculator.calculate(config1, cons1, "2026_06", 15);
+        Map<String, Object> br2 = (Map<String, Object>) res2.getMeterPointBreakdowns().get("MP-01");
+        assertEquals("SINH_HOAT_THIEU_DINH_MUC", br2.get("customer_case"));
+
+        // 4. Case 3: NGOAI_SINH_HOAT_100
+        node1.setMaNgia("TARIFF_NGOAI_SH");
+        config1.setCustomerType("NGOAI_SINH_HOAT");
+        CalculationResult res3 = calculator.calculate(config1, cons1, "2026_06", 30);
+        Map<String, Object> br3 = (Map<String, Object>) res3.getMeterPointBreakdowns().get("MP-01");
+        assertEquals("NGOAI_SINH_HOAT_100", br3.get("customer_case"));
+
+        // 5. Case 4: NGOAI_SINH_HOAT_MIX_SHBT_TL (Mixed split by ratio)
+        com.evn.billing.common.dto.PriceApplicationRule r1 = new com.evn.billing.common.dto.PriceApplicationRule();
+        r1.setMaNgia("TARIFF_NGOAI_SH");
+        r1.setLoaiDmuc("TL");
+        r1.setDinhMuc(BigDecimal.valueOf(70));
+        r1.setSoHo(1);
+
+        com.evn.billing.common.dto.PriceApplicationRule r2 = new com.evn.billing.common.dto.PriceApplicationRule();
+        r2.setMaNgia("TARIFF_SHBT_2023");
+        r2.setLoaiDmuc("TL");
+        r2.setDinhMuc(BigDecimal.valueOf(30));
+        r2.setSoHo(1);
+
+        node1.setPriceRules(List.of(r1, r2));
+        config1.setCustomerType("MIXED");
+        CalculationResult res4 = calculator.calculate(config1, cons1, "2026_06", 30);
+        Map<String, Object> br4 = (Map<String, Object>) res4.getMeterPointBreakdowns().get("MP-01");
+        assertEquals("NGOAI_SINH_HOAT_MIX_SHBT_TL", br4.get("customer_case"));
+
+        // 6. Case 5: NGOAI_SINH_HOAT_MIX_SHBT_SL (Mixed split by absolute volume limit)
+        r1.setLoaiDmuc("SL");
+        r1.setDinhMuc(BigDecimal.valueOf(150));
+        r2.setLoaiDmuc("SL");
+        r2.setDinhMuc(BigDecimal.valueOf(99999));
+
+        CalculationResult res5 = calculator.calculate(config1, cons1, "2026_06", 30);
+        Map<String, Object> br5 = (Map<String, Object>) res5.getMeterPointBreakdowns().get("MP-01");
+        assertEquals("NGOAI_SINH_HOAT_MIX_SHBT_SL", br5.get("customer_case"));
+    }
+
+    @Test
+    public void testExpressionEvalVariant() throws Exception {
+        com.evn.billing.engine.variant.ExpressionEvalVariant evalVariant = new com.evn.billing.engine.variant.ExpressionEvalVariant();
+
+        // Test 1: Multiplication
+        com.evn.billing.common.dto.BillingSchemaStep step1 = new com.evn.billing.common.dto.BillingSchemaStep();
+        step1.setStepConfig(Map.of("expression", "operands['BASE_AMOUNT'] * 0.10"));
+        step1.setOutputOperands(Map.of("result", "DISCOUNT_AMOUNT"));
+
+        Map<String, Object> operands = new HashMap<>();
+        operands.put("BASE_AMOUNT", BigDecimal.valueOf(1000));
+        
+        evalVariant.execute(operands, step1);
+        BigDecimal discount = (BigDecimal) operands.get("DISCOUNT_AMOUNT");
+        assertEquals(0, discount.compareTo(BigDecimal.valueOf(100)));
+
+        // Test 2: Conditional
+        com.evn.billing.common.dto.BillingSchemaStep step2 = new com.evn.billing.common.dto.BillingSchemaStep();
+        step2.setStepConfig(Map.of("expression", "operands['TOTAL_AMOUNT'] > 1000000 ? 50000 : 0"));
+        step2.setOutputOperands(Map.of("result", "POST_INVOICE_DISCOUNT"));
+
+        operands.put("TOTAL_AMOUNT", BigDecimal.valueOf(1200000));
+        evalVariant.execute(operands, step2);
+        BigDecimal disc = (BigDecimal) operands.get("POST_INVOICE_DISCOUNT");
+        assertEquals(0, disc.compareTo(BigDecimal.valueOf(50000)));
+
+        operands.put("TOTAL_AMOUNT", BigDecimal.valueOf(800000));
+        evalVariant.execute(operands, step2);
+        disc = (BigDecimal) operands.get("POST_INVOICE_DISCOUNT");
+        assertEquals(0, disc.compareTo(BigDecimal.ZERO));
     }
 }

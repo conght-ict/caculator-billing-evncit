@@ -5,7 +5,10 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 import java.util.List;
 
+import java.util.Optional;
+
 @Repository
 public interface BillingAccountSnapshotRepository extends JpaRepository<BillingAccountSnapshot, String> {
-    List<BillingAccountSnapshot> findByBookIdAndBillingCycleMonthAndPeriod(String bookId, String billingCycleMonth, Integer period);
+    List<BillingAccountSnapshot> findByDtuongQlyAndThangChuKyAndKyChot(String dtuongQly, String thangChuKy, Integer kyChot);
+    Optional<BillingAccountSnapshot> findByMaKhangAndThangChuKyAndKyChot(String maKhang, String thangChuKy, Integer kyChot);
 }

@@ -1,8 +1,28 @@
 services:
-  postgres:
+  # =========================================================================
+  # 1. DATABASE CLUSTER (PostgreSQL Primary & Standby HA - 2 Nodes)
+  # =========================================================================
+  postgres-primary:
     image: postgres:16-alpine
-    container_name: billing-postgres
-    command: ["postgres", "-c", "wal_level=logical"]
+    container_name: billing-postgres-primary
+    command: 
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_connections=400"
+      - "-c"
+      - "shared_buffers=1GB"
+      - "-c"
+      - "work_mem=64MB"
+      - "-c"
+      - "maintenance_work_mem=256MB"
+      - "-c"
+      - "max_wal_size=8GB"
+      - "-c"
+      - "checkpoint_completion_target=0.9"
+      - "-c"
+      - "synchronous_commit=off"
     ports:
       - "5432:5432"
     environment:
@@ -10,58 +30,126 @@ services:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - pgdata_primary:/var/lib/postgresql/data
       - ./init-db:/docker-entrypoint-initdb.d
 
-  redis:
-    image: redis:7-alpine
-    container_name: billing-redis
+  postgres-standby:
+    image: postgres:16-alpine
+    container_name: billing-postgres-standby
+    command: 
+      - "postgres"
+      - "-c"
+      - "wal_level=logical"
+      - "-c"
+      - "max_connections=300"
+      - "-c"
+      - "shared_buffers=128MB"
     ports:
-      - "6379:6379"
+      - "5433:5432"
+    environment:
+      - POSTGRES_DB=billing_db
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    volumes:
+      - pgdata_standby:/var/lib/postgresql/data
+    depends_on:
+      - postgres-primary
 
-  kafka:
+  # =========================================================================
+  # 2. REDIS CLUSTER CACHE (6 Nodes: 3 Masters + 3 Replicas)
+  # =========================================================================
+  redis1:
+    image: redis:7-alpine
+    container_name: billing-redis-1
+    command: ["redis-server", "--port", "6379", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
+    ports: ["6379:6379"]
+
+  redis2:
+    image: redis:7-alpine
+    container_name: billing-redis-2
+    command: ["redis-server", "--port", "6379", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
+    ports: ["6380:6379"]
+
+  redis3:
+    image: redis:7-alpine
+    container_name: billing-redis-3
+    command: ["redis-server", "--port", "6379", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
+    ports: ["6381:6379"]
+
+  redis4:
+    image: redis:7-alpine
+    container_name: billing-redis-4
+    command: ["redis-server", "--port", "6379", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
+    ports: ["6382:6379"]
+
+  redis5:
+    image: redis:7-alpine
+    container_name: billing-redis-5
+    command: ["redis-server", "--port", "6379", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
+    ports: ["6383:6379"]
+
+  redis6:
+    image: redis:7-alpine
+    container_name: billing-redis-6
+    command: ["redis-server", "--port", "6379", "--cluster-enabled", "yes", "--cluster-config-file", "nodes.conf", "--cluster-node-timeout", "5000", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
+    ports: ["6384:6379"]
+
+  redis-cluster-init:
+    image: redis:7-alpine
+    container_name: billing-redis-cluster-init
+    command:
+      - "sh"
+      - "-c"
+      - |
+        echo "Waiting for Redis nodes to start..."
+        sleep 5
+        redis-cli --cluster create redis1:6379 redis2:6379 redis3:6379 redis4:6379 redis5:6379 redis6:6379 --cluster-replicas 1 --cluster-yes || true
+    depends_on:
+      - redis1
+      - redis2
+      - redis3
+      - redis4
+      - redis5
+      - redis6
+
+  # =========================================================================
+  # 3. KAFKA BROKER (Single Node KRaft Mode for High Stability)
+  # =========================================================================
+  kafka1:
     image: confluentinc/cp-kafka:7.6.0
-    container_name: billing-kafka
+    container_name: billing-kafka-1
     ports:
       - "9092:9092"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
+      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka1:29092,PLAINTEXT_HOST://host.docker.internal:9092'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_PROCESS_ROLES: 'broker,controller'
-      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
+      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka1:29093'
       KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092'
       KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
       KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
-      # Generated random UUID for KRaft cluster format
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
+      KAFKA_HEAP_OPTS: "-Xms1g -Xmx2g"
+      KAFKA_NUM_PARTITIONS: 32
+      KAFKA_LOG_RETENTION_HOURS: 48
+      KAFKA_MESSAGE_MAX_BYTES: 10485760
+      KAFKA_COMPRESSION_TYPE: lz4
 
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: billing-kafka-ui
-    ports:
-      - "8089:8080"
-    environment:
-      - KAFKA_CLUSTERS_0_NAME=local
-      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:29092
-      - KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME=billing-connect
-      - KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS=http://connect:8083
-    depends_on:
-      - kafka
-      - connect
-
+  # =========================================================================
+  # 4. APP INTEGRATION CLUSTER & CDC CONNECT (2 Nodes)
+  # =========================================================================
   connect:
     image: debezium/connect:2.5
-    container_name: billing-connect
+    container_name: billing-connect-node1
     ports:
       - "8087:8083"
     environment:
-      - BOOTSTRAP_SERVERS=kafka:29092
+      - BOOTSTRAP_SERVERS=kafka1:29092
       - GROUP_ID=billing-connect-group
       - CONFIG_STORAGE_TOPIC=my_connect_configs
       - OFFSET_STORAGE_TOPIC=my_connect_offsets
@@ -71,16 +159,16 @@ services:
       - CONFIG_STORAGE_REPLICATION_FACTOR=1
       - OFFSET_STORAGE_REPLICATION_FACTOR=1
       - STATUS_STORAGE_REPLICATION_FACTOR=1
-      - CONNECT_REST_EXTENSION_CLASSES=
+      - KAFKA_HEAP_OPTS=-Xms256m -Xmx512m
     depends_on:
-      - kafka
-      - postgres
+      - kafka1
+      - postgres-primary
 
   register-connector:
     image: curlimages/curl:latest
     container_name: register-debezium-connector
     volumes:
-      - ./docs/debezium-outbox-connector.json:/debezium-outbox-connector.json
+      - ./infra/debezium-outbox-connector.json:/debezium-outbox-connector.json
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -94,16 +182,68 @@ services:
     depends_on:
       - connect
 
+  # =========================================================================
+  # 5. MANAGEMENT & MONITORING DASHBOARDS
+  # =========================================================================
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: billing-kafka-ui
+    ports:
+      - "8989:8080"
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=2M-Test-Cluster
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka1:29092
+      - KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME=billing-connect
+      - KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS=http://connect:8083
+    depends_on:
+      - kafka1
+      - connect
+
   debezium-ui:
     image: debezium/debezium-ui:2.5
     platform: linux/amd64
     container_name: billing-debezium-ui
     ports:
-      - "8090:8080"
+      - "8990:8080"
     environment:
       - KAFKA_CONNECT_URIS=http://connect:8083
     depends_on:
       - connect
 
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: billing-prometheus
+    volumes:
+      - ./infra/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: billing-grafana
+    ports:
+      - "3003:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./infra/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml
+      - ./infra/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/dashboards.yml
+      - ./infra/grafana-dashboard-evn-billing.json:/etc/grafana/provisioning/dashboards/grafana-dashboard-evn-billing.json
+    depends_on:
+      - prometheus
+
+  kafka-lag-exporter:
+    image: seglo/kafka-lag-exporter:0.8.2
+    container_name: billing-kafka-lag-exporter
+    volumes:
+      - ./infra/kafka-lag-exporter.conf:/opt/docker/conf/application.conf
+    ports:
+      - "8000:8000"
+    depends_on:
+      - kafka1
+
 volumes:
-  pgdata:
+  pgdata_primary:
+  pgdata_standby:

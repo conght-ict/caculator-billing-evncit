@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: evn-billing
+  labels:
+    app.kubernetes.io/name: evn-billing
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: billing-config
+  namespace: evn-billing
+data:
+  DB_HOST: "host.docker.internal"
+  DB_PORT: "5432"
+  DB_NAME: "billing_db"
+  KAFKA_SERVERS: "host.docker.internal:9092"
+  REDIS_HOST: "host.docker.internal"
+  REDIS_PORT: "6379"
+  SPRING_PROFILES_ACTIVE: "local"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: billing-secret
+  namespace: evn-billing
+type: Opaque
+stringData:
+  DB_USER: "postgres"
+  DB_PASS: "postgres"

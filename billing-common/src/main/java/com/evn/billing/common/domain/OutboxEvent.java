@@ -3,7 +3,6 @@ package com.evn.billing.common.domain;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import lombok.Getter;
@@ -14,31 +13,31 @@ import java.time.LocalDateTime;
 import java.util.UUID;
 
 @Entity
-@Table(name = "outbox_event")
+@Table(name = "su_kien_outbox")
 @Getter
 @Setter
 public class OutboxEvent {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    @Column(name = "event_id")
-    private UUID eventId;
+    @GeneratedValue(generator = "UUID")
+    @Column(name = "id_su_kien")
+    private UUID idSuKien;
 
-    @Column(name = "aggregate_type", length = 50, nullable = false)
-    private String aggregateType;
+    @Column(name = "loai_doi_tuong", length = 50, nullable = false)
+    private String loaiDoiTuong;
 
-    @Column(name = "aggregate_id", length = 100, nullable = false)
-    private String aggregateId;
+    @Column(name = "id_doi_tuong", length = 100, nullable = false)
+    private String idDoiTuong;
 
-    @Column(name = "event_type", length = 50, nullable = false)
-    private String eventType;
+    @Column(name = "loai_su_kien", length = 50, nullable = false)
+    private String loaiSuKien;
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "payload", nullable = false)
-    private String payload; // Stored as JSONB in DB
+    @Column(name = "noi_dung", nullable = false)
+    private String noiDung; // Stored as JSONB in DB
 
-    @Column(name = "status", length = 20, nullable = false)
-    private String status = "PENDING"; // PENDING, SENT
+    @Column(name = "trang_thai", length = 20, nullable = false)
+    private String trangThai = "PENDING"; // PENDING, SENT
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();

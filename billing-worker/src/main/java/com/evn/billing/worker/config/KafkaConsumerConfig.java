@@ -11,8 +11,13 @@ import org.springframework.kafka.listener.DefaultErrorHandler;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
 import org.springframework.util.backoff.FixedBackOff;
 
+import org.springframework.beans.factory.annotation.Value;
+
 @Configuration
 public class KafkaConsumerConfig {
+
+    @Value("${spring.kafka.listener.concurrency:4}")
+    private int concurrency;
 
     /**
      * Custom container factory that runs consumer poll loops and message processing
@@ -42,7 +47,7 @@ public class KafkaConsumerConfig {
                 new ConcurrentKafkaListenerContainerFactory<>();
         factory.setConsumerFactory(consumerFactory);
         factory.setBatchListener(true);
-        factory.setConcurrency(32);
+        factory.setConcurrency(concurrency);
         
         SimpleAsyncTaskExecutor executor = new SimpleAsyncTaskExecutor("kafka-batch-vt-");
         executor.setVirtualThreads(true);

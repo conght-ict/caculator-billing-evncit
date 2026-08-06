@@ -1,0 +1,53 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: evn-billing-ingress
+  namespace: evn-billing
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: evn-billing.local
+    http:
+      paths:
+      # Route to Unified Mediation & Batch Orchestrator Service
+      - path: /orchestrator(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: billing-mediation-service
+            port:
+              number: 8080
+
+      # Route to Mediation Service (Data Collection & Exceptions)
+      - path: /mediation(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: billing-mediation-service
+            port:
+              number: 8080
+
+      # Route to Billing Worker Nodes (Actuator & Metrics)
+      - path: /worker(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: billing-worker-service
+            port:
+              number: 8081
+
+      # Route to Snapshot Generator Service (Redis Cache Prewarmer)
+      - path: /snapshot(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: snapshot-generator-service
+            port:
+              number: 8082

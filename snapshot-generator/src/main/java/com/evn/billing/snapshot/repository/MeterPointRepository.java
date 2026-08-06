@@ -7,5 +7,5 @@ import java.util.List;
 
 @Repository
 public interface MeterPointRepository extends JpaRepository<MeterPoint, String> {
-    List<MeterPoint> findByAccountIdAndStatus(String accountId, String status);
+    List<MeterPoint> findByMaKhangAndStatus(String maKhang, String status);
 }

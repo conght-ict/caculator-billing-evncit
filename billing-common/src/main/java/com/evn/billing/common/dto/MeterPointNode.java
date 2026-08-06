@@ -1,15 +1,20 @@
 package com.evn.billing.common.dto;
 
 import lombok.Data;
-import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.List;
 
 @Data
 public class MeterPointNode {
-    private String meterPointId;
+    private String maDdo;
     private CalculationType calculationType;
-    private String tariffCode; // Associated tariff for this meter point
+    private String maNgia; // Default/primary tariff code (kept for backwards compatibility)
     private String meterSerial;
-    private BigDecimal maxRegisterValue;
+    private List<PriceApplicationRule> priceRules; // Freezing the bien_ban_ap_gia rules for this meter point
     private List<MeterPointNode> childPoints;
+    private List<MeterDetails> activeMeters; // [MỚI] Các công tơ hoạt động trong kỳ tính toán
+    private Short loaiDdo; // [MỚI] Loại điểm đo (phục vụ lấy bcs dự phòng)
+    private Boolean isDienMt; // [MỚI] Xác định điểm đo có phải điện mặt trời hay không
+    private LocalDate tuNgay;
+    private LocalDate denNgay;
 }

@@ -7,6 +7,9 @@ import java.util.Optional;
 
 @Repository
 public interface BillingAccountSnapshotRepository extends JpaRepository<BillingAccountSnapshot, String> {
-    Optional<BillingAccountSnapshot> findByAccountIdAndBillingCycleMonthAndPeriodAndCalculationVersion(
-            String accountId, String billingCycleMonth, Integer period, Integer calculationVersion);
+    Optional<BillingAccountSnapshot> findByMaKhangAndThangChuKyAndKyChotAndPhienBanTinh(
+            String maKhang, String thangChuKy, Integer kyChot, Integer phienBanTinh);
+
+    java.util.List<BillingAccountSnapshot> findByMaKhangInAndThangChuKyAndKyChotAndPhienBanTinh(
+            java.util.List<String> maKhangList, String thangChuKy, Integer kyChot, Integer phienBanTinh);
 }

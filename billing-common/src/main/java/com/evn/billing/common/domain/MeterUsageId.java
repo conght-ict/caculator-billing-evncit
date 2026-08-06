@@ -9,8 +9,8 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class MeterUsageId implements Serializable {
-    private Long usageId;
-    private Integer subReadingSeq;
-    private String billingCycleMonth;
-    private Integer period;
+    private Long idChiSo;
+    private Integer lanDocPhu;
+    private String thangChuKy;
+    private Integer kyChot;
 }

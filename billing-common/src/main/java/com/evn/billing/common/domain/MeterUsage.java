@@ -7,76 +7,85 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "meter_usage")
+@Table(name = "chi_so_dien_nang")
 @IdClass(MeterUsageId.class)
 @Getter
 @Setter
 public class MeterUsage {
 
     @Id
-    @Column(name = "usage_id")
-    private Long usageId;
+    @Column(name = "id_chi_so")
+    private Long idChiSo;
 
     @Id
-    @Column(name = "sub_reading_seq")
-    private Integer subReadingSeq = 1;
+    @Column(name = "lan_doc_phu")
+    private Integer lanDocPhu = 1;
 
     @Id
-    @Column(name = "billing_cycle_month", length = 20)
-    private String billingCycleMonth; // Format: YYYY_MM
+    @Column(name = "thang_chu_ky", length = 20)
+    private String thangChuKy; // Format: YYYY_MM
 
     @Id
-    @Column(name = "period")
-    private Integer period = 1;
+    @Column(name = "ky_chot")
+    private Integer kyChot = 1;
 
-    @Column(name = "account_id", length = 50, nullable = false)
-    private String accountId;
+    @Column(name = "ma_khang", length = 50, nullable = false)
+    private String maKhang;
 
-    @Column(name = "meter_point_id", length = 50, nullable = false)
-    private String meterPointId;
+    @Column(name = "ma_ddo", length = 50, nullable = false)
+    private String maDdo;
 
-    @Column(name = "from_date", nullable = false)
-    private LocalDateTime fromDate;
+    @Column(name = "tu_ngay", nullable = false)
+    private LocalDateTime tuNgay;
 
-    @Column(name = "to_date", nullable = false)
-    private LocalDateTime toDate;
+    @Column(name = "den_ngay", nullable = false)
+    private LocalDateTime denNgay;
 
-    @Column(name = "start_index", nullable = false, precision = 14, scale = 2)
-    private BigDecimal startIndex;
+    @Column(name = "chi_so_dau", nullable = false, precision = 14, scale = 2)
+    private BigDecimal chiSoDau;
 
-    @Column(name = "end_index", nullable = false, precision = 14, scale = 2)
-    private BigDecimal endIndex;
+    @Column(name = "chi_so_cuoi", nullable = false, precision = 14, scale = 2)
+    private BigDecimal chiSoCuoi;
 
-    @Column(name = "is_rollover", nullable = false)
-    private Boolean isRollover = false;
+    @Column(name = "co_quay_vong", nullable = false)
+    private Boolean coQuayVong = false;
 
-    @Column(name = "max_register_snapshot", precision = 14, scale = 2)
-    private BigDecimal maxRegisterSnapshot;
+    @Transient
+    private BigDecimal maxRegisterSnapshot; // Managed in-memory, no longer in the DB schema
 
-    @Column(name = "raw_consumption", nullable = false, precision = 14, scale = 2)
-    private BigDecimal rawConsumption;
+    @Column(name = "san_luong_tho", nullable = false, precision = 14, scale = 2)
+    private BigDecimal sanLuongTho;
 
-    @Column(name = "status", length = 20, nullable = false)
-    private String status = "PENDING_MANUAL"; // VALIDATED, PENDING_MANUAL
+    @Column(name = "trang_thai_xu_ly", length = 20, nullable = false)
+    private String trangThaiXuLy = "PENDING_MANUAL"; // VALIDATED, PENDING_MANUAL, TELEMETRY
 
-    @Column(name = "record_type", length = 20, nullable = false)
-    private String recordType = "ORIGINAL"; // ORIGINAL, CORRECTION
+    @Column(name = "loai_ghi_index", length = 20, nullable = false)
+    private String loaiGhiIndex = "ORIGINAL"; // ORIGINAL, CORRECTION
 
-    @Column(name = "correction_of_usage_id")
-    private Long correctionOfUsageId;
+    @Column(name = "id_chi_so_dieu_chinh")
+    private Long idChiSoDieuChinh;
 
-    @Column(name = "source", length = 20, nullable = false)
-    private String source = "AMR"; // AMR, HANDHELD, MANUAL
+    @Column(name = "nguon_ghi", length = 20, nullable = false)
+    private String nguonGhi = "AMR"; // AMR, HANDHELD, MANUAL
+
+    @Column(name = "tgian_bdien", length = 10, nullable = false)
+    private String tgianBdien = "BT"; // BT (Bình thường), CD (Cao điểm), TD (Thấp điểm)
+
+    @Column(name = "ma_cto", length = 50)
+    private String maCto;
+
+    @Column(name = "so_lan_quay_vong", nullable = false)
+    private Integer soLanQuayVong = 1;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 
     // Compatibility methods for existing codebase which queries getConsumption/setConsumption
     public BigDecimal getConsumption() {
-        return rawConsumption;
+        return sanLuongTho;
     }
 
     public void setConsumption(BigDecimal consumption) {
-        this.rawConsumption = consumption;
+        this.sanLuongTho = consumption;
     }
 }

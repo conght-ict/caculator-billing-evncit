@@ -1,9 +1,6 @@
 package com.evn.billing.engine;
 
-import com.evn.billing.common.dto.BillingConfigSnapshot;
-import com.evn.billing.common.dto.BillingSchemaStep;
-import com.evn.billing.common.dto.MeterPointNode;
-import com.evn.billing.common.dto.TariffRules;
+import com.evn.billing.common.dto.*;
 import com.evn.billing.engine.variant.BillingVariant;
 import com.evn.billing.engine.variant.VariantRegistry;
 import java.math.BigDecimal;
@@ -12,6 +9,7 @@ import java.util.*;
 
 public class BillingCalculator {
 
+    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(BillingCalculator.class);
     private final TopologyCalculator topologyCalculator = new TopologyCalculator();
 
     /**
@@ -19,7 +17,17 @@ public class BillingCalculator {
      */
     @SuppressWarnings("unchecked")
     public CalculationResult calculate(BillingConfigSnapshot config, Map<String, BigDecimal> consumptions) throws Exception {
-        return calculate(config, consumptions, "2026_06", 30);
+        String month = "2026_06";
+        if (config.getDenNgay() != null) {
+            java.time.LocalDate toDate = config.getDenNgay();
+            month = String.format("%d_%02d", toDate.getYear(), toDate.getMonthValue());
+        }
+        long days = 30;
+        if (config.getTuNgay() != null && config.getDenNgay() != null) {
+            days = java.time.temporal.ChronoUnit.DAYS.between(config.getTuNgay(), config.getDenNgay()) + 1;
+            if (days <= 0) days = 30;
+        }
+        return calculate(config, consumptions, month, days);
     }
 
     /**
@@ -30,6 +38,10 @@ public class BillingCalculator {
         Map<String, Object> meterPointBreakdowns = new HashMap<>();
         List<Map<String, Object>> stepDetails = new ArrayList<>();
         Map<String, BigDecimal> nodeNetConsumptions = new HashMap<>();
+
+        if (config.getBieuGia() == null || config.getBieuGia().isEmpty()) {
+            throw new IllegalStateException("Snapshot is missing tariff configuration for account: " + config.getMaKhang());
+        }
 
         // Find the rating step configuration (typically step 10)
         BillingSchemaStep ratingStep = config.getSchemaSteps().stream()
@@ -56,177 +68,133 @@ public class BillingCalculator {
 
         BigDecimal totalBaseAmount = BigDecimal.ZERO;
 
-        if (config.isFastPathEnabled()) {
-            // ⚡ FAST PATH (Only 1 meter, relations are empty)
-            BigDecimal rawCons = consumptions.get(config.getFastPathMeterPointId());
-            if (rawCons == null) {
-                throw new NoSuchElementException("Reading missing for fast-path meter: " + config.getFastPathMeterPointId());
-            }
-            nodeNetConsumptions.put(config.getFastPathMeterPointId(), rawCons);
-
-            // Execute the rating step variant
-            Map<String, Object> operands = new HashMap<>();
-            operands.put("NET_KWH", rawCons);
-            operands.put("FAST_TARIFF_CODE", config.getFastPathTariffCode());
-            operands.put("NORMS_FACTOR", config.getNormsFactor());
-            operands.put("PRO_RATA_FACTOR", proRataFactor);
-            operands.put("TARIFFS", config.getTariffs());
-
-            BillingVariant variant = VariantRegistry.get(ratingStep.getVariantName());
-            variant.execute(operands, ratingStep);
-
-            BigDecimal amount = (BigDecimal) operands.get(ratingStep.getOutputOperands().get("amount"));
-            List<RatingStepEngine.StepResult> steps = (List<RatingStepEngine.StepResult>) operands.get(ratingStep.getOutputOperands().get("breakdown"));
-
-            totalBaseAmount = amount;
-
-            Map<String, Object> nodeBreakdown = new HashMap<>();
-            nodeBreakdown.put("meter_point_id", config.getFastPathMeterPointId());
-            nodeBreakdown.put("tariff_code", config.getFastPathTariffCode());
-            nodeBreakdown.put("net_consumption", rawCons);
-            nodeBreakdown.put("amount", amount);
-            nodeBreakdown.put("steps", steps);
-            meterPointBreakdowns.put(config.getFastPathMeterPointId(), nodeBreakdown);
-
-            for (RatingStepEngine.StepResult r : steps) {
-                Map<String, Object> sd = new HashMap<>();
-                sd.put("meter_point_id", config.getFastPathMeterPointId());
-                sd.put("step", r.getStep());
-                sd.put("kwh", r.getKwhConsumed());
-                sd.put("price", r.getUnitPrice());
-                sd.put("amount", r.getAmount());
-                stepDetails.add(sd);
-            }
-        } else {
-            // 🐢 SLOW PATH / MULTIPLE METERS
-            // Calculate net consumption for all nodes recursively
-            List<MeterPointNode> allNodes = new ArrayList<>();
-            if (config.getMeterTopology() != null && config.getMeterTopology().getRootPoints() != null) {
-                for (MeterPointNode root : config.getMeterTopology().getRootPoints()) {
-                    collectAllNodes(root, allNodes);
-                }
-            }
-
-            for (MeterPointNode node : allNodes) {
-                BigDecimal net = topologyCalculator.calculateNetConsumption(node, consumptions);
-                nodeNetConsumptions.put(node.getMeterPointId(), net != null ? net : BigDecimal.ZERO);
-            }
-
-            // Separate stepping nodes (which must be aggregated under STEPPING/SHBT rule) and flat nodes (TOU/manufacturing)
-            List<MeterPointNode> steppingNodes = new ArrayList<>();
-            List<MeterPointNode> flatNodes = new ArrayList<>();
-
-            for (MeterPointNode node : allNodes) {
-                if (node.getTariffCode() != null) {
-                    TariffRules rules = config.getTariffs().get(node.getTariffCode());
-                    if (rules != null && "STEPPING".equals(rules.getType())) {
-                        steppingNodes.add(node);
-                    } else {
-                        flatNodes.add(node);
-                    }
-                }
-            }
-
-            // Execute aggregated stepping rating calculation exactly once for all stepping nodes sharing TARIFF_SHBT
-            if (!steppingNodes.isEmpty()) {
-                BigDecimal totalSteppingNet = BigDecimal.ZERO;
-                for (MeterPointNode sn : steppingNodes) {
-                    totalSteppingNet = totalSteppingNet.add(nodeNetConsumptions.get(sn.getMeterPointId()));
-                }
-
-                MeterPointNode primarySteppingNode = steppingNodes.get(0);
-                Map<String, Object> operands = new HashMap<>();
-                operands.put("NET_KWH", totalSteppingNet);
-                operands.put("FAST_TARIFF_CODE", primarySteppingNode.getTariffCode());
-                operands.put("NORMS_FACTOR", config.getNormsFactor());
-                operands.put("PRO_RATA_FACTOR", proRataFactor);
-                operands.put("TARIFFS", config.getTariffs());
-
-                BillingVariant variant = VariantRegistry.get("STEP_RATING");
-                variant.execute(operands, ratingStep);
-
-                BigDecimal steppingAmount = (BigDecimal) operands.get(ratingStep.getOutputOperands().get("amount"));
-                List<RatingStepEngine.StepResult> steps = (List<RatingStepEngine.StepResult>) operands.get(ratingStep.getOutputOperands().get("breakdown"));
-
-                totalBaseAmount = totalBaseAmount.add(steppingAmount);
-
-                Map<String, Object> primaryBreakdown = new HashMap<>();
-                primaryBreakdown.put("meter_point_id", primarySteppingNode.getMeterPointId());
-                primaryBreakdown.put("tariff_code", primarySteppingNode.getTariffCode());
-                primaryBreakdown.put("net_consumption", totalSteppingNet);
-                primaryBreakdown.put("amount", steppingAmount);
-                primaryBreakdown.put("steps", steps);
-                meterPointBreakdowns.put(primarySteppingNode.getMeterPointId(), primaryBreakdown);
-
-                for (RatingStepEngine.StepResult r : steps) {
-                    Map<String, Object> sd = new HashMap<>();
-                    sd.put("meter_point_id", primarySteppingNode.getMeterPointId());
-                    sd.put("step", r.getStep());
-                    sd.put("kwh", r.getKwhConsumed());
-                    sd.put("price", r.getUnitPrice());
-                    sd.put("amount", r.getAmount());
-                    stepDetails.add(sd);
-                }
-
-                // Associate other stepping nodes with 0 values to avoid double billing
-                for (int i = 1; i < steppingNodes.size(); i++) {
-                    MeterPointNode otherNode = steppingNodes.get(i);
-                    Map<String, Object> otherBreakdown = new HashMap<>();
-                    otherBreakdown.put("meter_point_id", otherNode.getMeterPointId());
-                    otherBreakdown.put("tariff_code", otherNode.getTariffCode());
-                    otherBreakdown.put("net_consumption", nodeNetConsumptions.get(otherNode.getMeterPointId()));
-                    otherBreakdown.put("amount", BigDecimal.ZERO);
-                    otherBreakdown.put("steps", Collections.emptyList());
-                    meterPointBreakdowns.put(otherNode.getMeterPointId(), otherBreakdown);
-                }
-            }
-
-            // Execute flat rating calculation separately for each flat node (TOU/manufacturing)
-            for (MeterPointNode flatNode : flatNodes) {
-                BigDecimal net = nodeNetConsumptions.get(flatNode.getMeterPointId());
-                Map<String, Object> operands = new HashMap<>();
-                operands.put("NET_KWH", net);
-                operands.put("FAST_TARIFF_CODE", flatNode.getTariffCode());
-                operands.put("NORMS_FACTOR", config.getNormsFactor());
-                operands.put("PRO_RATA_FACTOR", proRataFactor);
-                operands.put("TARIFFS", config.getTariffs());
-
-                BillingVariant variant = VariantRegistry.get("FLAT_RATING");
-                variant.execute(operands, ratingStep);
-
-                BigDecimal flatAmount = (BigDecimal) operands.get(ratingStep.getOutputOperands().get("amount"));
-                List<RatingStepEngine.StepResult> steps = (List<RatingStepEngine.StepResult>) operands.get(ratingStep.getOutputOperands().get("breakdown"));
-
-                totalBaseAmount = totalBaseAmount.add(flatAmount);
-
-                Map<String, Object> nodeBreakdown = new HashMap<>();
-                nodeBreakdown.put("meter_point_id", flatNode.getMeterPointId());
-                nodeBreakdown.put("tariff_code", flatNode.getTariffCode());
-                nodeBreakdown.put("net_consumption", net);
-                nodeBreakdown.put("amount", flatAmount);
-                nodeBreakdown.put("steps", steps);
-                meterPointBreakdowns.put(flatNode.getMeterPointId(), nodeBreakdown);
-
-                for (RatingStepEngine.StepResult r : steps) {
-                    Map<String, Object> sd = new HashMap<>();
-                    sd.put("meter_point_id", flatNode.getMeterPointId());
-                    sd.put("step", r.getStep());
-                    sd.put("kwh", r.getKwhConsumed());
-                    sd.put("price", r.getUnitPrice());
-                    sd.put("amount", r.getAmount());
-                    stepDetails.add(sd);
-                }
+        // 🐢 UNIFIED PATH FOR ALL TOPOLOGIES (Single/Multiple Meters, Stepping, Flat, TOU, and Mixed Pricing)
+        List<MeterPointNode> allNodes = new ArrayList<>();
+        if (config.getMeterTopology() != null && config.getMeterTopology().getRootPoints() != null) {
+            for (MeterPointNode root : config.getMeterTopology().getRootPoints()) {
+                collectAllNodes(root, allNodes);
             }
         }
 
-        // 2. Set up Account-Level Operands Context
+        // 1. Calculate net consumption for each node (netting & child aggregation)
+        for (MeterPointNode node : allNodes) {
+            BigDecimal net = topologyCalculator.calculateNetConsumption(node, consumptions);
+            nodeNetConsumptions.put(node.getMaDdo(), net != null ? net : BigDecimal.ZERO);
+        }
+
+        // 2. Process rating for each node based on its pricing rules
+        for (MeterPointNode node : allNodes) {
+            BigDecimal net = nodeNetConsumptions.get(node.getMaDdo());
+            if (net == null) net = BigDecimal.ZERO;
+
+            List<PriceApplicationRule> rules = node.getPriceRules();
+            if (rules == null || rules.isEmpty()) {
+                if (node.getMaNgia() == null) {
+                    throw new IllegalArgumentException("No pricing rules or tariff code mapped for meter point: " + node.getMaDdo());
+                }
+                PriceApplicationRule defaultRule = new PriceApplicationRule();
+                defaultRule.setMaNgia(node.getMaNgia());
+                int normsFactor = config.getSoHo();
+                if ("SINH_HOAT".equals(config.getCustomerType()) && normsFactor <= 0) {
+                    throw new IllegalArgumentException("Norms factor must be a positive integer, but was " + normsFactor);
+                }
+                defaultRule.setSoHo(normsFactor);
+                defaultRule.setTgianBdien("BT");
+                rules = Collections.singletonList(defaultRule);
+            }
+
+            String customerCase = classifyCustomerCase(node, rules, proRataFactor, config, net);
+            log.info("MeterPointId: {} classified as customer case: {}", node.getMaDdo(), customerCase);
+
+            BigDecimal remainingKwh = net;
+            BigDecimal nodeAmount = BigDecimal.ZERO;
+            List<RatingStepEngine.StepResult> nodeSteps = new ArrayList<>();
+
+            for (PriceApplicationRule rule : rules) {
+                BigDecimal allocatedKwh = BigDecimal.ZERO;
+                
+                // Fetch the consumption based on Time period or fall back to total node consumption
+                BigDecimal sourceCons = net;
+                if (rule.getTgianBdien() != null) {
+                    String registerKey = node.getMaDdo() + "_" + rule.getTgianBdien();
+                    if (consumptions.containsKey(registerKey)) {
+                        sourceCons = consumptions.get(registerKey);
+                    }
+                }
+
+                // Apply Mixed Pricing splits: TL (%) or SL (kWh volume) or full remainder
+                if (("TL".equals(rule.getLoaiDmuc()) || "%".equals(rule.getLoaiDmuc())) && rule.getDinhMuc() != null) {
+                    allocatedKwh = sourceCons.multiply(rule.getDinhMuc())
+                            .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+                } else if (("SL".equals(rule.getLoaiDmuc()) || "Kwh".equalsIgnoreCase(rule.getLoaiDmuc()) || "C".equals(rule.getLoaiDmuc())) && rule.getDinhMuc() != null) {
+                    BigDecimal proRataLimit = rule.getDinhMuc().multiply(proRataFactor);
+                    allocatedKwh = remainingKwh.min(proRataLimit);
+                    remainingKwh = remainingKwh.subtract(allocatedKwh);
+                } else {
+                    allocatedKwh = remainingKwh;
+                    remainingKwh = BigDecimal.ZERO;
+                }
+
+                String tariffCode = rule.getMaNgia();
+                TariffRules tariffRules = config.getBieuGia().get(tariffCode);
+                if (tariffRules == null) {
+                    throw new IllegalStateException("Missing tariff rules configuration for code: " + tariffCode
+                            + " (account: " + config.getMaKhang() + ", meter: " + node.getMaDdo() + ")");
+                }
+
+                List<RatingStepEngine.StepResult> ruleSteps;
+                Map<String, Object> operands = new HashMap<>();
+                operands.put("NET_KWH", allocatedKwh);
+                operands.put("FAST_TARIFF_CODE", tariffCode);
+                operands.put("NORMS_FACTOR", rule.getSoHo());
+                operands.put("PRO_RATA_FACTOR", proRataFactor);
+                operands.put("TARIFFS", config.getBieuGia());
+
+                if ("STEPPING".equals(tariffRules.getLoaiBieuGia())) {
+                    BillingVariant variant = VariantRegistry.get("STEP_RATING");
+                    variant.execute(operands, ratingStep);
+                    ruleSteps = (List<RatingStepEngine.StepResult>) operands.get(ratingStep.getOutputOperands().get("breakdown"));
+                } else {
+                    BillingVariant variant = VariantRegistry.get("FLAT_RATING");
+                    variant.execute(operands, ratingStep);
+                    ruleSteps = (List<RatingStepEngine.StepResult>) operands.get(ratingStep.getOutputOperands().get("breakdown"));
+                }
+
+                for (RatingStepEngine.StepResult r : ruleSteps) {
+                    nodeAmount = nodeAmount.add(r.getAmount());
+                    nodeSteps.add(r);
+
+                    Map<String, Object> sd = new HashMap<>();
+                    sd.put("meter_point_id", node.getMaDdo());
+                    sd.put("step", r.getStep());
+                    sd.put("kwh", r.getKwhConsumed());
+                    sd.put("price", r.getUnitPrice());
+                    sd.put("amount", r.getAmount());
+                    sd.put("tariff_code", tariffCode);
+                    sd.put("time_period", rule.getTgianBdien());
+                    stepDetails.add(sd);
+                }
+            }
+
+            totalBaseAmount = totalBaseAmount.add(nodeAmount);
+
+            Map<String, Object> nodeBreakdown = new HashMap<>();
+            nodeBreakdown.put("meter_point_id", node.getMaDdo());
+            nodeBreakdown.put("net_consumption", net);
+            nodeBreakdown.put("amount", nodeAmount);
+            nodeBreakdown.put("steps", nodeSteps);
+            nodeBreakdown.put("customer_case", customerCase);
+            meterPointBreakdowns.put(node.getMaDdo(), nodeBreakdown);
+        }
+
+        // 3. Set up Account-Level Operands Context
         Map<String, Object> accountOperands = new HashMap<>();
         accountOperands.put("BASE_AMOUNT", totalBaseAmount);
         accountOperands.put("DISCOUNT_AMOUNT", BigDecimal.ZERO);
         accountOperands.put("TAX_AMOUNT", BigDecimal.ZERO);
         accountOperands.put("TOTAL_AMOUNT", totalBaseAmount);
 
-        // 3. Execute remaining steps in the Billing Schema sequentially (e.g., Discount, Taxes)
+        // 4. Execute remaining steps in the Billing Schema sequentially (e.g., Discount, Taxes)
         List<BillingSchemaStep> sortedSteps = new ArrayList<>(config.getSchemaSteps());
         sortedSteps.sort(Comparator.comparing(BillingSchemaStep::getStepNumber));
 
@@ -256,12 +224,230 @@ public class BillingCalculator {
         );
     }
 
+    @SuppressWarnings("unchecked")
+    public CalculationResult calculateFastPath(BillingConfigSnapshot config, Map<String, BigDecimal> consumptions, String billingCycleMonth, long daysUsed) throws Exception {
+        Map<String, Object> meterPointBreakdowns = new HashMap<>();
+        List<Map<String, Object>> stepDetails = new ArrayList<>();
+        Map<String, BigDecimal> nodeNetConsumptions = new HashMap<>();
+
+        if (config.getBieuGia() == null || config.getBieuGia().isEmpty()) {
+            throw new IllegalStateException("Snapshot is missing tariff configuration for account: " + config.getMaKhang());
+        }
+
+        // Find the rating step configuration (typically step 10)
+        BillingSchemaStep ratingStep = config.getSchemaSteps().stream()
+                .filter(s -> "STEP_RATING".equals(s.getVariantName()) || "FLAT_RATING".equals(s.getVariantName()))
+                .findFirst()
+                .orElseThrow(() -> new NoSuchElementException("Billing Schema is missing a primary rating step (STEP_RATING / FLAT_RATING)"));
+
+        // Compute pro-rata factor based on actual days in the billing month
+        BigDecimal proRataFactor = BigDecimal.ONE;
+        if (billingCycleMonth != null && billingCycleMonth.contains("_")) {
+            try {
+                String[] parts = billingCycleMonth.split("_");
+                int year = Integer.parseInt(parts[0]);
+                int monthVal = Integer.parseInt(parts[1]);
+                java.time.YearMonth yearMonth = java.time.YearMonth.of(year, monthVal);
+                int daysInMonth = yearMonth.lengthOfMonth();
+                if (daysUsed < daysInMonth && daysUsed > 0) {
+                    proRataFactor = BigDecimal.valueOf(daysUsed).divide(BigDecimal.valueOf(daysInMonth), 8, RoundingMode.HALF_UP);
+                }
+            } catch (Exception e) {
+                // Ignore parsing errors and default to 1.0
+            }
+        }
+
+        // Fast Path: assume single meter point node, no netting tree traversal
+        if (config.getMeterTopology() == null 
+                || config.getMeterTopology().getRootPoints() == null 
+                || config.getMeterTopology().getRootPoints().isEmpty()) {
+            throw new IllegalStateException("Fast-path requires at least one root meter point in topology");
+        }
+
+        MeterPointNode node = config.getMeterTopology().getRootPoints().get(0);
+        BigDecimal net = consumptions.get(node.getMaDdo());
+        if (net == null) {
+            throw new IllegalStateException("No consumption found for fast-path meterPointId: " + node.getMaDdo());
+        }
+        nodeNetConsumptions.put(node.getMaDdo(), net);
+
+        List<PriceApplicationRule> rules = node.getPriceRules();
+        if (rules == null || rules.isEmpty()) {
+            if (node.getMaNgia() == null) {
+                throw new IllegalArgumentException("No pricing rules or tariff code mapped for fast path meter point: " + node.getMaDdo());
+            }
+            PriceApplicationRule defaultRule = new PriceApplicationRule();
+            defaultRule.setMaNgia(node.getMaNgia());
+            int normsFactor = config.getSoHo();
+            if ("SINH_HOAT".equals(config.getCustomerType()) && normsFactor <= 0) {
+                throw new IllegalArgumentException("Norms factor must be a positive integer, but was " + normsFactor);
+            }
+            defaultRule.setSoHo(normsFactor);
+            defaultRule.setTgianBdien("BT");
+            rules = Collections.singletonList(defaultRule);
+        }
+
+        String customerCase = classifyCustomerCase(node, rules, proRataFactor, config, net);
+        log.info("[FAST-PATH] MeterPointId: {} classified as customer case: {}", node.getMaDdo(), customerCase);
+
+        BigDecimal remainingKwh = net;
+        BigDecimal nodeAmount = BigDecimal.ZERO;
+        List<RatingStepEngine.StepResult> nodeSteps = new ArrayList<>();
+
+        for (PriceApplicationRule rule : rules) {
+            BigDecimal allocatedKwh = BigDecimal.ZERO;
+            BigDecimal sourceCons = net;
+            if (rule.getTgianBdien() != null) {
+                String registerKey = node.getMaDdo() + "_" + rule.getTgianBdien();
+                if (consumptions.containsKey(registerKey)) {
+                    sourceCons = consumptions.get(registerKey);
+                }
+            }
+
+            if (("TL".equals(rule.getLoaiDmuc()) || "%".equals(rule.getLoaiDmuc())) && rule.getDinhMuc() != null) {
+                allocatedKwh = sourceCons.multiply(rule.getDinhMuc())
+                        .divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP);
+            } else if (("SL".equals(rule.getLoaiDmuc()) || "Kwh".equalsIgnoreCase(rule.getLoaiDmuc()) || "C".equals(rule.getLoaiDmuc())) && rule.getDinhMuc() != null) {
+                BigDecimal proRataLimit = rule.getDinhMuc().multiply(proRataFactor);
+                allocatedKwh = remainingKwh.min(proRataLimit);
+                remainingKwh = remainingKwh.subtract(allocatedKwh);
+            } else {
+                allocatedKwh = remainingKwh;
+                remainingKwh = BigDecimal.ZERO;
+            }
+
+            String tariffCode = rule.getMaNgia();
+            TariffRules tariffRules = config.getBieuGia().get(tariffCode);
+            if (tariffRules == null) {
+                throw new IllegalStateException("Missing tariff rules configuration for code: " + tariffCode
+                        + " (account: " + config.getMaKhang() + ", meter: " + node.getMaDdo() + ")");
+            }
+
+            List<RatingStepEngine.StepResult> ruleSteps;
+            Map<String, Object> operands = new HashMap<>();
+            operands.put("NET_KWH", allocatedKwh);
+            operands.put("FAST_TARIFF_CODE", tariffCode);
+            operands.put("NORMS_FACTOR", rule.getSoHo());
+            operands.put("PRO_RATA_FACTOR", proRataFactor);
+            operands.put("TARIFFS", config.getBieuGia());
+
+            if ("STEPPING".equals(tariffRules.getLoaiBieuGia())) {
+                BillingVariant variant = VariantRegistry.get("STEP_RATING");
+                variant.execute(operands, ratingStep);
+                ruleSteps = (List<RatingStepEngine.StepResult>) operands.get(ratingStep.getOutputOperands().get("breakdown"));
+            } else {
+                BillingVariant variant = VariantRegistry.get("FLAT_RATING");
+                variant.execute(operands, ratingStep);
+                ruleSteps = (List<RatingStepEngine.StepResult>) operands.get(ratingStep.getOutputOperands().get("breakdown"));
+            }
+
+            for (RatingStepEngine.StepResult r : ruleSteps) {
+                nodeAmount = nodeAmount.add(r.getAmount());
+                nodeSteps.add(r);
+
+                Map<String, Object> sd = new HashMap<>();
+                sd.put("meter_point_id", node.getMaDdo());
+                sd.put("step", r.getStep());
+                sd.put("kwh", r.getKwhConsumed());
+                sd.put("price", r.getUnitPrice());
+                sd.put("amount", r.getAmount());
+                sd.put("tariff_code", tariffCode);
+                sd.put("time_period", rule.getTgianBdien());
+                stepDetails.add(sd);
+            }
+        }
+
+        BigDecimal totalBaseAmount = nodeAmount;
+
+        Map<String, Object> nodeBreakdown = new HashMap<>();
+        nodeBreakdown.put("meter_point_id", node.getMaDdo());
+        nodeBreakdown.put("net_consumption", net);
+        nodeBreakdown.put("amount", nodeAmount);
+        nodeBreakdown.put("steps", nodeSteps);
+        nodeBreakdown.put("customer_case", customerCase);
+        meterPointBreakdowns.put(node.getMaDdo(), nodeBreakdown);
+
+        // Account Level steps
+        Map<String, Object> accountOperands = new HashMap<>();
+        accountOperands.put("BASE_AMOUNT", totalBaseAmount);
+        accountOperands.put("DISCOUNT_AMOUNT", BigDecimal.ZERO);
+        accountOperands.put("TAX_AMOUNT", BigDecimal.ZERO);
+        accountOperands.put("TOTAL_AMOUNT", totalBaseAmount);
+
+        List<BillingSchemaStep> sortedSteps = new ArrayList<>(config.getSchemaSteps());
+        sortedSteps.sort(Comparator.comparing(BillingSchemaStep::getStepNumber));
+
+        for (BillingSchemaStep step : sortedSteps) {
+            if (step.getStepNumber() == ratingStep.getStepNumber()) {
+                continue;
+            }
+            BillingVariant variant = VariantRegistry.get(step.getVariantName());
+            variant.execute(accountOperands, step);
+        }
+
+        BigDecimal finalTotalBeforeTax = totalBaseAmount;
+        BigDecimal finalTotalAfterTax = (BigDecimal) accountOperands.get("TOTAL_AMOUNT");
+        BigDecimal finalTaxAmount = (BigDecimal) accountOperands.get("TAX_AMOUNT");
+        BigDecimal finalDiscountAmount = (BigDecimal) accountOperands.get("DISCOUNT_AMOUNT");
+
+        return new CalculationResult(
+                finalTotalBeforeTax,
+                finalTaxAmount,
+                finalTotalAfterTax,
+                finalDiscountAmount,
+                meterPointBreakdowns,
+                stepDetails,
+                nodeNetConsumptions
+        );
+    }
+
     private void collectAllNodes(MeterPointNode node, List<MeterPointNode> allNodes) {
         if (node == null) return;
         allNodes.add(node);
         if (node.getChildPoints() != null) {
             for (MeterPointNode child : node.getChildPoints()) {
                 collectAllNodes(child, allNodes);
+            }
+        }
+    }
+
+    private String classifyCustomerCase(MeterPointNode node, List<PriceApplicationRule> rules, BigDecimal proRataFactor, BillingConfigSnapshot config, BigDecimal net) {
+        String baseType = config.getCustomerType();
+        if (baseType == null) {
+            throw new IllegalArgumentException("Customer type (customerCategory) is missing in snapshot configuration for account: " + config.getMaKhang());
+        }
+
+        double X = net != null ? net.doubleValue() : 0.0;
+
+        if ("SINH_HOAT".equals(baseType)) {
+            int soHo = config.getSoHo();
+            if (soHo <= 0) {
+                throw new IllegalArgumentException("Norms factor must be a positive integer, but was " + soHo + " for account: " + config.getMaKhang());
+            }
+            // Determine reading fluctuations/variations
+            if (proRataFactor != null && proRataFactor.compareTo(BigDecimal.ONE) < 0) {
+                return "SINH_HOAT_THIEU_DINH_MUC"; // Thiếu định mức do lẻ ngày
+            } else if (X < 50.0 * soHo) {
+                return "SINH_HOAT_THIEU_DINH_MUC"; // Thiếu định mức do sản lượng thấp dưới bậc 1
+            } else {
+                return "SINH_HOAT_DU_DINH_MUC"; // Dùng đủ định mức chuẩn
+            }
+        } else if ("NGOAI_SINH_HOAT".equals(baseType)) {
+            return "NGOAI_SINH_HOAT_100";
+        } else {
+            // Mixed pricing cases (MIXED)
+            String normType = null;
+            for (PriceApplicationRule rule : rules) {
+                if (rule.getLoaiDmuc() != null) {
+                    normType = rule.getLoaiDmuc();
+                }
+            }
+            if ("TL".equals(normType) || "%".equals(normType)) {
+                return "NGOAI_SINH_HOAT_MIX_SHBT_TL";
+            } else if ("SL".equals(normType) || "Kwh".equalsIgnoreCase(normType) || "C".equals(normType)) {
+                return "NGOAI_SINH_HOAT_MIX_SHBT_SL";
+            } else {
+                return "NGOAI_SINH_HOAT_MIX_SHBT";
             }
         }
     }

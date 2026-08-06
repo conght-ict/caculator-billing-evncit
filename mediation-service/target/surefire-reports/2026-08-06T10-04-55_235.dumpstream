@@ -1,0 +1,5 @@
+# Created at 2026-08-06T10:05:04.339
+Boot Manifest-JAR contains absolute paths in classpath 'E:\caculator-billing-evncit\mediation-service\target\test-classes'
+Hint: <argLine>-Djdk.net.URLClassPath.disableClassPathURLCheck=true</argLine>
+'other' has different root
+

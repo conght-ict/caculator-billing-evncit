@@ -5,9 +5,9 @@ import com.evn.billing.common.domain.MeterUsage;
 import com.evn.billing.common.domain.MeterUsageId;
 import com.evn.billing.common.dto.BillingConfigSnapshot;
 import com.evn.billing.common.dto.MeterPointNode;
-import com.evn.billing.mediation.dto.BillingTaskDto;
+import com.evn.billing.common.dto.BillingTaskDto;
+import com.evn.billing.common.dto.MeterReadingDto;
 import com.evn.billing.mediation.dto.CmisReadingEvent;
-import com.evn.billing.mediation.dto.MeterReadingDto;
 import java.util.stream.Collectors;
 import com.evn.billing.mediation.repository.BillingAccountSnapshotRepository;
 import com.evn.billing.mediation.repository.MeterUsageRepository;
@@ -48,7 +48,16 @@ public class CmisIngestionListener {
     private org.springframework.data.redis.core.StringRedisTemplate redisTemplate;
 
     @Autowired
-    private org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
+    private com.evn.billing.mediation.repository.AmrIngestionRepository amrIngestionRepository;
+ 
+    @Autowired
+    private com.evn.billing.mediation.repository.BillInvoiceRepository billInvoiceRepository;
+
+    @Autowired
+    private com.evn.billing.mediation.validation.ReadingsValidationEngine validationEngine;
+
+    @Autowired
+    private com.evn.billing.mediation.validation.SolarMeterBcsAdapter solarMeterBcsAdapter;
 
     /**
      * Helper to load account snapshot profile (Cache-aside using Redis & Postgres).
@@ -67,9 +76,9 @@ public class CmisIngestionListener {
 
         if (config == null) {
             Optional<BillingAccountSnapshot> snapshotOpt = snapshotRepository
-                    .findByAccountIdAndBillingCycleMonthAndPeriodAndCalculationVersion(accountId, month, period, 1);
+                    .findByMaKhangAndThangChuKyAndKyChotAndPhienBanTinh(accountId, month, period, 1);
             if (snapshotOpt.isPresent()) {
-                config = snapshotOpt.get().getConfigData();
+                config = snapshotOpt.get().getDuLieuCauHinh();
                 try {
                     redisTemplate.opsForValue().set(cacheKey, objectMapper.writeValueAsString(config), 24, java.util.concurrent.TimeUnit.HOURS);
                 } catch (Exception e) {
@@ -96,26 +105,11 @@ public class CmisIngestionListener {
         
         log.info("Mediation batch listener received size: {}", records.size());
 
-        // Extract all meter point IDs to batch query their max registers
-        Set<String> meterPointIds = records.stream()
-            .map(r -> r.value())
-            .filter(Objects::nonNull)
-            .map(CmisReadingEvent::getMeterPointId)
-            .filter(Objects::nonNull)
-            .collect(Collectors.toSet());
+        // Batch load all configs and initialize schedule cache to prevent N+1 queries
+        Map<String, BillingConfigSnapshot> localConfigCache = batchLoadConfigs(records);
+        Map<String, List<Map<String, Object>>> scheduleCache = new HashMap<>();
 
-        // Local cache map for max register values
-        Map<String, BigDecimal> maxRegisters = new HashMap<>();
-        if (!meterPointIds.isEmpty()) {
-            String placeholders = String.join(",", Collections.nCopies(meterPointIds.size(), "?"));
-            String correctSql = "SELECT mp.meter_point_id, COALESCE(mm.max_register_value, 99999.9) " +
-                                "FROM meter_point mp " +
-                                "LEFT JOIN meter_model mm ON mp.model_code = mm.model_code " +
-                                "WHERE mp.meter_point_id IN (" + placeholders + ")";
-            jdbcTemplate.query(correctSql, rs -> {
-                maxRegisters.put(rs.getString(1), rs.getBigDecimal(2));
-            }, meterPointIds.toArray());
-        }
+        // No longer querying meter_model since it is deleted. Rollover limits are processed dynamically.
 
         List<Object[]> meterUsageBatch = new ArrayList<>();
         
@@ -123,7 +117,7 @@ public class CmisIngestionListener {
             CmisReadingEvent event = record.value();
             if (event == null) continue;
 
-            String rawMonth = event.getBillingCycleMonth();
+            String rawMonth = event.getThangChuKy();
             String month = rawMonth;
             int period = 1;
             if (rawMonth != null && rawMonth.contains("_")) {
@@ -136,41 +130,110 @@ public class CmisIngestionListener {
                     // Ignore
                 }
             }
+            String eventJson = null;
+            try {
+                eventJson = objectMapper.writeValueAsString(event);
+            } catch (Exception e) {}
+            amrIngestionRepository.logIngestionLifecycle(event.getMaKhang(), event.getMaDdo(), month, period, "INGESTION", "RECEIVED", eventJson, event.getNguonGhi());
 
-            long generatedId = Math.abs((event.getMeterPointId() + "_" + month + "_" + period).hashCode());
-            BigDecimal maxVal = maxRegisters.getOrDefault(event.getMeterPointId(), new BigDecimal("99999.9"));
+            long generatedId = Math.abs((event.getMaDdo() + "_" + month + "_" + period).hashCode());
             
-            boolean isRollover = event.getEndIndex().compareTo(event.getStartIndex()) < 0;
+            boolean indexDropped = event.getChiSoCuoi().compareTo(event.getChiSoDau()) < 0;
+            boolean isRollover = indexDropped && event.getSoLanQuayVong() != null && event.getSoLanQuayVong() > 0;
             BigDecimal rawConsumption;
+            int rCount = event.getSoLanQuayVong() != null ? event.getSoLanQuayVong() : 1;
             if (isRollover) {
-                rawConsumption = maxVal.subtract(event.getStartIndex()).add(event.getEndIndex());
+                double startVal = event.getChiSoDau().doubleValue();
+                double digits = Math.ceil(Math.log10(startVal));
+                if (digits <= 0) digits = 5;
+                BigDecimal maxVal = BigDecimal.valueOf(Math.pow(10, digits));
+                rawConsumption = maxVal.multiply(BigDecimal.valueOf(rCount)).subtract(event.getChiSoDau()).add(event.getChiSoCuoi());
+            } else if (!indexDropped) {
+                rawConsumption = event.getChiSoCuoi().subtract(event.getChiSoDau());
             } else {
-                rawConsumption = event.getEndIndex().subtract(event.getStartIndex());
+                // Index dropped without declared rollover — treat as zero pending manual review
+                rawConsumption = BigDecimal.ZERO;
             }
 
-            LocalDateTime fromDate = event.getFromDate() != null ? event.getFromDate() : LocalDateTime.now().minusDays(30);
-            LocalDateTime toDate = event.getToDate() != null ? event.getToDate() : LocalDateTime.now();
+            LocalDateTime fromDate = event.getTuNgay() != null ? event.getTuNgay() : LocalDateTime.now().minusDays(30);
+            LocalDateTime toDate = event.getDenNgay() != null ? event.getDenNgay() : LocalDateTime.now();
 
             String status = "VALIDATED";
             String reason = null;
 
             // Perform quality validation checks
-            if (event.getEndIndex().compareTo(event.getStartIndex()) < 0 && !isRollover) {
+            if (indexDropped && !isRollover) {
                 status = "PENDING_MANUAL";
                 reason = "Index value dropped without hardware rollover capability.";
             } else if (rawConsumption.compareTo(new BigDecimal("5000.00")) > 0) {
                 status = "SUSPECT";
                 reason = "Consumption spike warnings (exceeds 5000 kWh limit).";
-            }
-
-            // [Nghiệp vụ Phân biệt Chỉ số đo xa hàng ngày và Chỉ số chốt kỳ cước]
+            }            // [Nghiệp vụ Phân biệt Chỉ số đo xa hàng ngày và Chỉ số chốt kỳ cước]
+            BillingConfigSnapshot config = localConfigCache.get(event.getMaKhang() + ":" + month + ":" + period);
             if ("VALIDATED".equals(status)) {
-                BillingConfigSnapshot config = getSnapshotConfig(event.getAccountId(), month, period);
-                if (config != null && config.getPeriodToDate() != null && event.getToDate() != null) {
+                if (config != null && config.getDenNgay() != null && event.getDenNgay() != null) {
                     // Nếu thời điểm đọc nhỏ hơn ngày chốt kỳ cước đã cấu hình -> chỉ ghi nhận làm chỉ số đo xa đo đếm
-                    if (event.getToDate().toLocalDate().isBefore(config.getPeriodToDate())) {
+                    if (event.getDenNgay().toLocalDate().isBefore(config.getDenNgay())) {
                         status = "TELEMETRY"; // Chỉ số đo đếm hàng ngày
                     }
+                }
+            }
+
+            Map<String, Object> valDetail = new HashMap<>();
+            valDetail.put("reason", reason);
+            valDetail.put("consumption", rawConsumption);
+            valDetail.put("startIndex", event.getChiSoDau());
+            valDetail.put("endIndex", event.getChiSoCuoi());
+            String valDetailJson = null;
+            try {
+                valDetailJson = objectMapper.writeValueAsString(valDetail);
+            } catch (Exception e) {}
+            amrIngestionRepository.logIngestionLifecycle(event.getMaKhang(), event.getMaDdo(), month, period, "VALIDATION", status, valDetailJson, event.getNguonGhi());
+
+            // [Nghiệp vụ kiểm tra dung sai ngày N-1 và N+1 đối với đối tượng quản lý]
+            // Rule này chỉ áp dụng cho chỉ số chốt kỳ cước (được định danh là VALIDATED) của Đối tượng quản lý
+            if ("VALIDATED".equals(status)) {
+                try {
+                    String dtuongQly = config != null ? config.getDtuongQly() : null;
+                    
+                    if (dtuongQly != null && !dtuongQly.isEmpty()) {
+                        String schedKey = dtuongQly + ":" + month + ":" + period;
+                        List<Map<String, Object>> schedules = scheduleCache.get(schedKey);
+                        if (schedules == null) {
+                            schedules = amrIngestionRepository.findScheduleTolerance(dtuongQly, month, period);
+                            scheduleCache.put(schedKey, schedules);
+                        }
+                        
+                        if (!schedules.isEmpty()) {
+                            Map<String, Object> sched = schedules.get(0);
+                            LocalDate denNgay = null;
+                            Object denNgayObj = sched.get("den_ngay");
+                            if (denNgayObj instanceof java.sql.Date) {
+                                denNgay = ((java.sql.Date) denNgayObj).toLocalDate();
+                            } else if (denNgayObj instanceof LocalDate) {
+                                denNgay = (LocalDate) denNgayObj;
+                            }
+                            
+                            Number nTruNum = (Number) sched.get("n_tru");
+                            Number nCongNum = (Number) sched.get("n_cong");
+                            int nTru = nTruNum != null ? nTruNum.intValue() : 0;
+                            int nCong = nCongNum != null ? nCongNum.intValue() : 0;
+                            
+                            if (denNgay != null && event.getDenNgay() != null) {
+                                LocalDate readingDate = event.getDenNgay().toLocalDate();
+                                LocalDate minAllowed = denNgay.minusDays(nTru);
+                                LocalDate maxAllowed = denNgay.plusDays(nCong);
+                                
+                                if (readingDate.isBefore(minAllowed) || readingDate.isAfter(maxAllowed)) {
+                                    status = "PENDING_MANUAL";
+                                    reason = String.format("Reading date (%s) outside tolerance window [N-%d=%s, N+%d=%s] compared to target date (%s)",
+                                            readingDate, nTru, minAllowed, nCong, maxAllowed, denNgay);
+                                }
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("[VALIDATION] Failed to check schedule tolerance for account: {}, error: {}", event.getMaKhang(), e.getMessage());
                 }
             }
 
@@ -178,54 +241,69 @@ public class CmisIngestionListener {
             if (!"VALIDATED".equals(status) && !"TELEMETRY".equals(status)) {
                 try {
                     Map<String, Object> validationError = new HashMap<>();
-                    validationError.put("bookId", "SO_01");
-                    validationError.put("accountId", event.getAccountId());
-                    validationError.put("meterPointId", event.getMeterPointId());
-                    validationError.put("billingCycleMonth", event.getBillingCycleMonth());
+                    if (config == null || config.getDtuongQly() == null) {
+                        throw new IllegalStateException("Snapshot configuration or dtuongQly is missing for account: " + event.getMaKhang());
+                    }
+                    String dtuongQly = config.getDtuongQly();
+                    validationError.put("dtuongQly", dtuongQly);
+                    validationError.put("accountId", event.getMaKhang());
+                    validationError.put("meterPointId", event.getMaDdo());
+                    validationError.put("billingCycleMonth", event.getThangChuKy());
                     validationError.put("usageId", generatedId);
                     validationError.put("status", status);
                     validationError.put("reason", reason);
-                    validationError.put("startIndex", event.getStartIndex());
-                    validationError.put("endIndex", event.getEndIndex());
+                    validationError.put("startIndex", event.getChiSoDau());
+                    validationError.put("endIndex", event.getChiSoCuoi());
                     validationError.put("timestamp", LocalDateTime.now().toString());
 
                     String validationErrorJson = objectMapper.writeValueAsString(validationError);
-                    kafkaTemplate.send("meter-reading-validation-results", event.getAccountId(), validationErrorJson);
+                    kafkaTemplate.send("meter-reading-validation-results", event.getMaKhang(), validationErrorJson);
                     log.warn("[VALIDATION] Flagged anomalous reading for Account: {}, Status: {}, Reason: {}",
-                            event.getAccountId(), status, reason);
+                            event.getMaKhang(), status, reason);
+ 
+                    // Write validation error log to nhat_ky_chi_so
+                    amrIngestionRepository.logIngestionLifecycle(
+                        event.getMaKhang(), event.getMaDdo(), month, period, 
+                        "VALIDATION", status, validationErrorJson, event.getNguonGhi()
+                    );
+                    
+                    // Update customer billing status to SUSPECT or PENDING_MANUAL
+                    amrIngestionRepository.updateCustomerBillingStatus(
+                        event.getMaKhang(), month, period, status, reason
+                    );
                 } catch (Exception e) {
-                    log.error("Failed to publish validation error event to Kafka: {}", e.getMessage());
+                    log.error("Failed to publish validation error event to Kafka or DB: {}", e.getMessage());
                 }
             }
 
-            // INSERT INTO meter_usage with sub_reading_seq = 1 (ORIGINAL)
+            String rawBcs = event.getTgianBdien() != null ? event.getTgianBdien() : "BT";
+            boolean isDienMt = isDienMtMeterPoint(config, event.getMaDdo());
+            String adaptedBcs = solarMeterBcsAdapter.adaptBcs(rawBcs, isDienMt);
+
             meterUsageBatch.add(new Object[] {
                 generatedId,
-                1, // sub_reading_seq
-                event.getAccountId(),
-                event.getMeterPointId(),
+                1, // lan_doc_phu
+                event.getMaKhang(),
+                event.getMaDdo(),
                 month,
                 period,
                 java.sql.Timestamp.valueOf(fromDate),
                 java.sql.Timestamp.valueOf(toDate),
-                event.getStartIndex(),
-                event.getEndIndex(),
+                event.getChiSoDau(),
+                event.getChiSoCuoi(),
                 isRollover,
-                maxVal,
                 rawConsumption,
-                status
+                status,
+                event.getNguonGhi() != null ? event.getNguonGhi() : "AMR",
+                adaptedBcs,
+                event.getMaCto() != null ? event.getMaCto() : "UNKNOWN",
+                rCount
             });
         }
 
-        // 1. Bulk insert usages using JDBC Batch (ON CONFLICT DO NOTHING for strict Deduplication)
+        // 1. Bulk insert usages using Repository Bulk Insert (ON CONFLICT DO NOTHING for strict Deduplication)
         if (!meterUsageBatch.isEmpty()) {
-            String sql = "INSERT INTO meter_usage (" +
-                    "usage_id, sub_reading_seq, account_id, meter_point_id, billing_cycle_month, period, " +
-                    "from_date, to_date, start_index, end_index, is_rollover, " +
-                    "max_register_snapshot, raw_consumption, status, record_type, source) " +
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ORIGINAL', 'AMR') " +
-                    "ON CONFLICT DO NOTHING";
-            jdbcTemplate.batchUpdate(sql, meterUsageBatch);
+            amrIngestionRepository.batchInsertCmisReadings(meterUsageBatch);
             log.info("Ingested batch of {} readings to DB via JDBC Batch (Deduplicated).", meterUsageBatch.size());
         }
 
@@ -234,7 +312,7 @@ public class CmisIngestionListener {
             CmisReadingEvent event = record.value();
             if (event == null) continue;
 
-            String rawMonth = event.getBillingCycleMonth();
+            String rawMonth = event.getThangChuKy();
             String month = rawMonth;
             int period = 1;
             if (rawMonth != null && rawMonth.contains("_")) {
@@ -249,10 +327,10 @@ public class CmisIngestionListener {
             }
 
             // Check if it is the final billing index of the period
-            BillingConfigSnapshot config = getSnapshotConfig(event.getAccountId(), month, period);
+            BillingConfigSnapshot config = localConfigCache.get(event.getMaKhang() + ":" + month + ":" + period);
             boolean isBillingReading = true;
-            if (config != null && config.getPeriodToDate() != null && event.getToDate() != null) {
-                if (event.getToDate().toLocalDate().isBefore(config.getPeriodToDate())) {
+            if (config != null && config.getDenNgay() != null && event.getDenNgay() != null) {
+                if (event.getDenNgay().toLocalDate().isBefore(config.getDenNgay())) {
                     isBillingReading = false;
                 }
             }
@@ -267,86 +345,185 @@ public class CmisIngestionListener {
                         // Ignore
                     }
                 }
-                checkAndTriggerBilling(event.getAccountId(), month, period, event.getMeterPointId(), t1Ingest);
+                checkAndTriggerBilling(event.getMaKhang(), month, period, event.getMaDdo(), t1Ingest, config);
+            }
+        }
+    }
+
+    private void collectRequiredReadings(MeterPointNode node, Set<String> requiredReadings) {
+        List<com.evn.billing.common.dto.MeterDetails> activeCtos = node.getActiveMeters();
+        if (activeCtos != null && !activeCtos.isEmpty()) {
+            for (com.evn.billing.common.dto.MeterDetails cto : activeCtos) {
+                List<String> bcsList = cto.getDanhSachBcs();
+                if (bcsList == null || bcsList.isEmpty()) {
+                    bcsList = List.of("KT");
+                }
+                String maCto = cto.getMaCto();
+                if (maCto == null) maCto = cto.getSoSeri();
+                if (maCto == null) maCto = "UNKNOWN";
+
+                for (String bcs : bcsList) {
+                    requiredReadings.add(node.getMaDdo() + ":" + bcs + ":" + maCto);
+                }
+            }
+        } else {
+            // Fallback to legacy behavior if activeMeters is empty
+            if (node.getPriceRules() != null && !node.getPriceRules().isEmpty()) {
+                for (com.evn.billing.common.dto.PriceApplicationRule rule : node.getPriceRules()) {
+                    String bcs = rule.getTgianBdien() != null ? rule.getTgianBdien() : "BT";
+                    requiredReadings.add(node.getMaDdo() + ":" + bcs + ":UNKNOWN");
+                }
+            } else {
+                requiredReadings.add(node.getMaDdo() + ":BT:UNKNOWN");
+            }
+        }
+
+        if (node.getChildPoints() != null) {
+            for (MeterPointNode child : node.getChildPoints()) {
+                collectRequiredReadings(child, requiredReadings);
             }
         }
     }
 
     public void checkAndTriggerBilling(String accountId, String month, int period, String currentMeterPointId, long t1Ingest) {
+        BillingConfigSnapshot config = getSnapshotConfig(accountId, month, period);
+        checkAndTriggerBilling(accountId, month, period, currentMeterPointId, t1Ingest, config);
+    }
+
+    public void checkAndTriggerBilling(String accountId, String month, int period, String currentMeterPointId, long t1Ingest, BillingConfigSnapshot config) {
         log.info("[INGESTION] Triggering billing check for Account: {}, Month: {}, Period: {}", accountId, month, period);
         
-        BillingConfigSnapshot config = getSnapshotConfig(accountId, month, period);
         if (config == null) {
             log.warn("[INGESTION] Snapshot missing for Account: {}, Month: {}, Period: {}", accountId, month, period);
             return;
         }
 
-        String bookId = config.getBookId() != null ? config.getBookId() : "SO_01";
-
+        if (config.getDtuongQly() == null) {
+            throw new IllegalStateException("Snapshot configuration is missing dtuongQly for account: " + accountId);
+        }
+        String dtuongQly = config.getDtuongQly();
+ 
+        if (amrIngestionRepository.isBatchJobRunning(dtuongQly, month, period)) {
+            log.info("[INGESTION] Spring Batch Job is running for Book: {}, Month: {}, Period: {}. Skipping ROLLING trigger.", 
+                    dtuongQly, month, period);
+            return;
+        }
+ 
         if (config.getMeterTopology() == null || config.getMeterTopology().getRootPoints() == null) {
             log.warn("[INGESTION] Topology is null or root points null for Account: {}", accountId);
             return;
         }
 
-        // Collect all meter IDs in the topology
-        Set<String> requiredMeters = new HashSet<>();
+        // Collect all required readings (meterPointId + ":" + bcs + ":" + maCto) from the topology
+        Set<String> requiredReadings = new HashSet<>();
         for (MeterPointNode root : config.getMeterTopology().getRootPoints()) {
-            collectMeterIds(root, requiredMeters);
+            collectRequiredReadings(root, requiredReadings);
         }
 
         // 3. Completeness check
         boolean isComplete = false;
-        Set<String> receivedMeters = new HashSet<>();
+        Set<String> receivedReadings = new HashSet<>();
         
-        // Optimization: if there's only 1 meter required for this account, and it matches the current event, it's immediately complete!
-        if (requiredMeters.size() == 1 && requiredMeters.contains(currentMeterPointId)) {
-            MeterUsageId compositeKey = new MeterUsageId((long) Math.abs((currentMeterPointId + "_" + month + "_" + period).hashCode()), 1, month, period);
-            Optional<MeterUsage> usageOpt = meterUsageRepository.findById(compositeKey);
-            if (usageOpt.isPresent() && "VALIDATED".equals(usageOpt.get().getStatus())) {
-                isComplete = true;
-                receivedMeters.add(currentMeterPointId);
-            }
-        } else {
-            // Fallback to database check for multi-meter accounts
-            List<MeterUsage> validatedUsages = meterUsageRepository.findByAccountIdAndBillingCycleMonthAndPeriodAndStatus(accountId, month, period, "VALIDATED");
-            for (MeterUsage u : validatedUsages) {
-                receivedMeters.add(u.getMeterPointId());
-            }
-            if (receivedMeters.containsAll(requiredMeters)) {
-                isComplete = true;
+        // Fetch database for all validated readings of this account, month, period
+        List<MeterUsage> validatedUsages = meterUsageRepository.findByMaKhangAndThangChuKyAndKyChotAndTrangThaiXuLy(accountId, month, period, "VALIDATED");
+        
+        // Filter validated usages to only keep the latest subReadingSeq for each meter register
+        Map<String, MeterUsage> latestUsagesMap = new HashMap<>();
+        for (MeterUsage u : validatedUsages) {
+            String maCto = u.getMaCto();
+            if (maCto == null) maCto = "UNKNOWN";
+            String key = u.getMaDdo() + ":" + u.getTgianBdien() + ":" + maCto;
+            MeterUsage existing = latestUsagesMap.get(key);
+            if (existing == null || u.getLanDocPhu() > existing.getLanDocPhu()) {
+                latestUsagesMap.put(key, u);
             }
         }
+        
+        for (String key : latestUsagesMap.keySet()) {
+            receivedReadings.add(key);
+        }
+        
+        if (receivedReadings.containsAll(requiredReadings)) {
+            isComplete = true;
+        }
 
-        log.info("[AUDIT-TRACER] [Account: {}] Step 3: Topology readiness check. Required meters: {}, Received meters: {}.", accountId, requiredMeters, receivedMeters);
+        log.info("[AUDIT-TRACER] [Account: {}] Step 3: Topology readiness check. Required registers: {}, Received registers: {}.", accountId, requiredReadings, receivedReadings);
 
         if (isComplete) {
+            // Log completeness success
+            amrIngestionRepository.logIngestionLifecycle(accountId, null, month, period, "COMPLETENESS", "COMPLETE", null, "SYSTEM");
+
+            // Run validation engine rules (Pmax, CSPK, Abnormal Spike) before triggering billing
+            com.evn.billing.mediation.validation.ValidationResult valResult = validationEngine.validate(accountId, month, period, config, validatedUsages);
+            if (!valResult.isValid()) {
+                String errorMsg = String.join("; ", valResult.getErrors());
+                log.warn("[INGESTION] Account {} failed validation check: {}. Updating status to PENDING_MANUAL.", accountId, errorMsg);
+                amrIngestionRepository.updateCustomerBillingStatus(accountId, month, period, valResult.getStatus(), errorMsg);
+                
+                String errorsJson = null;
+                try {
+                    errorsJson = objectMapper.writeValueAsString(valResult.getErrors());
+                } catch (Exception e) {}
+                amrIngestionRepository.logIngestionLifecycle(accountId, null, month, period, "VALIDATION", valResult.getStatus(), errorsJson, "SYSTEM");
+                return;
+            }
+
+            // Log validation success
+            amrIngestionRepository.logIngestionLifecycle(accountId, null, month, period, "VALIDATION", "PASS", null, "SYSTEM");
+
+            if (!tryAcquireBillingTriggerGate(dtuongQly, accountId, month, period)) {
+                log.info("[INGESTION] Skip duplicate trigger for Account: {}, Month: {}, Period: {} because status gate is already claimed.", accountId, month, period);
+                return;
+            }
+
             log.info("[AUDIT-TRACER] [Account: {}] Step 3.1: Netting readiness verified. Triggering calculation task via Kafka.", accountId);
             
             // Send billing task to Kafka
             BillingTaskDto task = new BillingTaskDto();
-            task.setAccountId(accountId);
-            task.setBookId(bookId);
-            task.setBillingCycleMonth(month);
-            task.setPeriod(period);
-            task.setCalculationVersion(1);
+            task.setMaKhang(accountId);
+            task.setDtuongQly(dtuongQly);
+            task.setThangChuKy(month);
+            task.setKyChot(period);
+            int nextVersion = (int) billInvoiceRepository.countByMaKhangAndThangChuKyAndKyChot(accountId, month, period) + 1;
+            task.setPhienBanTinh(nextVersion);
             task.setTraceId(UUID.randomUUID().toString().replace("-", ""));
+            task.setTriggeredBy("ROLLING");
+
+            // Resolve classification flags from snapshot & usages
+            String finalChangeFlag = "NONE";
+            if (config != null && config.getChangeFlags() != null) {
+                finalChangeFlag = config.getChangeFlags();
+            }
+            boolean hasReadingChange = validatedUsages.stream().anyMatch(u -> "CORRECTION".equals(u.getLoaiGhiIndex()) || (u.getLanDocPhu() != null && u.getLanDocPhu() > 1));
+            if (hasReadingChange) {
+                if ("NONE".equals(finalChangeFlag)) {
+                    finalChangeFlag = "READING_CHANGE";
+                } else {
+                    finalChangeFlag = "MULTI_CHANGE";
+                }
+            }
+            task.setChangeFlags(finalChangeFlag);
+            task.setLoaiKhang(config != null ? config.getCustomerType() : "SINH_HOAT");
+            task.setHasRelation(config != null && config.isHasRelation());
             
-            List<MeterUsage> validatedUsages = meterUsageRepository.findByAccountIdAndBillingCycleMonthAndPeriodAndStatus(accountId, month, period, "VALIDATED");
-            List<MeterReadingDto> readings = validatedUsages.stream()
+            List<MeterReadingDto> readings = latestUsagesMap.values().stream()
                 .map(u -> new MeterReadingDto(
-                    u.getMeterPointId(),
-                    u.getFromDate(),
-                    u.getToDate(),
-                    u.getStartIndex(),
-                    u.getEndIndex(),
+                    u.getMaDdo(),
+                    u.getTuNgay(),
+                    u.getDenNgay(),
+                    u.getChiSoDau(),
+                    u.getChiSoCuoi(),
                     u.getConsumption(),
-                    u.getIsRollover(),
+                    u.getCoQuayVong(),
                     u.getMaxRegisterSnapshot(),
-                    u.getSubReadingSeq(),
-                    u.getRecordType()
+                    u.getLanDocPhu(),
+                    u.getLoaiGhiIndex(),
+                    u.getMaCto(),
+                    u.getSoLanQuayVong(),
+                    u.getTgianBdien()
                 ))
                 .collect(Collectors.toList());
-            task.setReadings(readings);
+            task.setDanhSachChiSo(readings);
 
             long t2Send = System.currentTimeMillis();
             ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("billing-execution-topic", accountId, task);
@@ -356,16 +533,182 @@ public class CmisIngestionListener {
             kafkaTemplate.send(producerRecord);
             log.info("[INGESTION] Successfully sent billing task to billing-execution-topic for Account: {}", accountId);
         } else {
-            log.info("[INGESTION] Account {} is missing readings. Required: {}, Received: {}", accountId, requiredMeters, receivedMeters);
+            log.info("[INGESTION] Account {} is missing readings. Required: {}, Received: {}", accountId, requiredReadings, receivedReadings);
+            
+            // Log missing registers into trang_thai_tinh_toan_kh to allow CMIS/Portal queries
+            try {
+                Set<String> missing = new HashSet<>(requiredReadings);
+                missing.removeAll(receivedReadings);
+                
+                Map<String, Object> errorMap = new HashMap<>();
+                errorMap.put("error_type", "INCOMPLETE_READINGS");
+                errorMap.put("missing_registers", missing);
+                String missingStr = objectMapper.writeValueAsString(errorMap);
+ 
+                amrIngestionRepository.logIncompleteStatus(accountId, month, dtuongQly, period, missingStr);
+                log.info("[INGESTION] Logged INCOMPLETE status for Account: {} due to: {}", accountId, missingStr);
+
+                Map<String, Object> compDetail = new HashMap<>();
+                compDetail.put("required", requiredReadings);
+                compDetail.put("received", receivedReadings);
+                compDetail.put("missing", missing);
+                String compDetailJson = null;
+                try {
+                    compDetailJson = objectMapper.writeValueAsString(compDetail);
+                } catch (Exception e) {}
+                amrIngestionRepository.logIngestionLifecycle(accountId, null, month, period, "COMPLETENESS", "INCOMPLETE", compDetailJson, "SYSTEM");
+            } catch (Exception e) {
+                log.error("[INGESTION] Failed to log INCOMPLETE status for Account: {}", accountId, e);
+            }
         }
     }
 
-    private void collectMeterIds(MeterPointNode node, Set<String> ids) {
-        ids.add(node.getMeterPointId());
-        if (node.getChildPoints() != null) {
-            for (MeterPointNode child : node.getChildPoints()) {
-                collectMeterIds(child, ids);
+    private boolean tryAcquireBillingTriggerGate(String dtuongQly, String accountId, String month, int period) {
+        return amrIngestionRepository.tryAcquireBillingTriggerGate(dtuongQly, accountId, month, period);
+    }
+
+    public Map<String, BillingConfigSnapshot> batchLoadConfigs(
+            List<org.apache.kafka.clients.consumer.ConsumerRecord<String, CmisReadingEvent>> records) {
+        
+        Map<String, BillingConfigSnapshot> cache = new HashMap<>();
+        if (records == null || records.isEmpty()) return cache;
+
+        // Group unique accounts by month and period
+        Map<String, Set<String>> groupToAccounts = new HashMap<>(); // key: "month:period" -> set of accountIds
+        for (org.apache.kafka.clients.consumer.ConsumerRecord<String, CmisReadingEvent> record : records) {
+            CmisReadingEvent event = record.value();
+            if (event == null) continue;
+
+            String rawMonth = event.getThangChuKy();
+            String month = rawMonth;
+            int period = 1;
+            if (rawMonth != null && rawMonth.contains("_")) {
+                int lastUnderscore = rawMonth.lastIndexOf('_');
+                try {
+                    period = Integer.parseInt(rawMonth.substring(lastUnderscore + 1));
+                    month = rawMonth.substring(0, lastUnderscore);
+                } catch (NumberFormatException e) {
+                    // Ignore
+                }
+            }
+            String key = month + ":" + period;
+            groupToAccounts.computeIfAbsent(key, k -> new HashSet<>()).add(event.getMaKhang());
+        }
+
+        // Batch load all configurations
+        for (Map.Entry<String, Set<String>> entry : groupToAccounts.entrySet()) {
+            String[] parts = entry.getKey().split(":");
+            String month = parts[0];
+            int period = Integer.parseInt(parts[1]);
+            List<String> accountIds = new ArrayList<>(entry.getValue());
+
+            Map<String, BillingConfigSnapshot> configs = getSnapshotConfigs(accountIds, month, period);
+            for (Map.Entry<String, BillingConfigSnapshot> configEntry : configs.entrySet()) {
+                String accId = configEntry.getKey();
+                cache.put(accId + ":" + month + ":" + period, configEntry.getValue());
             }
         }
+        return cache;
+    }
+
+    public Map<String, BillingConfigSnapshot> getSnapshotConfigs(List<String> accountIds, String month, int period) {
+        Map<String, BillingConfigSnapshot> result = new HashMap<>();
+        if (accountIds == null || accountIds.isEmpty()) return result;
+
+        List<String> cacheKeys = new ArrayList<>();
+        Map<String, String> keyToAccountId = new HashMap<>();
+        for (String accountId : accountIds) {
+            String key = "snapshot:" + accountId + ":" + month + ":" + period;
+            cacheKeys.add(key);
+            keyToAccountId.put(key, accountId);
+        }
+
+        List<String> cachedJsons = null;
+        try {
+            cachedJsons = redisTemplate.opsForValue().multiGet(cacheKeys);
+        } catch (Exception e) {
+            log.error("Failed to batch read snapshots from Redis: {}", e.getMessage());
+        }
+
+        List<String> missingAccountIds = new ArrayList<>();
+        if (cachedJsons != null) {
+            for (int i = 0; i < cacheKeys.size(); i++) {
+                String key = cacheKeys.get(i);
+                String json = cachedJsons.get(i);
+                String accountId = keyToAccountId.get(key);
+                if (json != null) {
+                    try {
+                        BillingConfigSnapshot config = objectMapper.readValue(json, BillingConfigSnapshot.class);
+                        result.put(accountId, config);
+                    } catch (Exception e) {
+                        log.error("Failed to parse cached snapshot for account: {}, error: {}", accountId, e.getMessage());
+                        missingAccountIds.add(accountId);
+                    }
+                } else {
+                    missingAccountIds.add(accountId);
+                }
+            }
+        } else {
+            missingAccountIds.addAll(accountIds);
+        }
+
+        if (!missingAccountIds.isEmpty()) {
+            // Batch load from Postgres DB using IN query
+            List<BillingAccountSnapshot> snapshots = snapshotRepository.findByMaKhangInAndThangChuKyAndKyChotAndPhienBanTinh(
+                    missingAccountIds, month, period, 1
+            );
+            Map<String, String> redisMSet = new HashMap<>();
+            for (BillingAccountSnapshot snapshot : snapshots) {
+                BillingConfigSnapshot config = snapshot.getDuLieuCauHinh();
+                result.put(snapshot.getMaKhang(), config);
+                String key = "snapshot:" + snapshot.getMaKhang() + ":" + month + ":" + period;
+                try {
+                    redisMSet.put(key, objectMapper.writeValueAsString(config));
+                } catch (Exception e) {
+                    // Ignore
+                }
+            }
+            if (!redisMSet.isEmpty()) {
+                try {
+                    redisTemplate.opsForValue().multiSet(redisMSet);
+                    // Set expiration for each key in batch
+                    for (String key : redisMSet.keySet()) {
+                        redisTemplate.expire(key, 24, java.util.concurrent.TimeUnit.HOURS);
+                    }
+                } catch (Exception e) {
+                    // Ignore
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private boolean isDienMtMeterPoint(BillingConfigSnapshot config, String meterPointId) {
+        if (config == null || config.getMeterTopology() == null || config.getMeterTopology().getRootPoints() == null) {
+            return false;
+        }
+        for (com.evn.billing.common.dto.MeterPointNode node : config.getMeterTopology().getRootPoints()) {
+            Boolean found = findIsDienMt(node, meterPointId);
+            if (found != null) {
+                return found;
+            }
+        }
+        return false;
+    }
+
+    private Boolean findIsDienMt(com.evn.billing.common.dto.MeterPointNode node, String meterPointId) {
+        if (node.getMaDdo().equals(meterPointId)) {
+            return node.getIsDienMt() != null ? node.getIsDienMt() : false;
+        }
+        if (node.getChildPoints() != null) {
+            for (com.evn.billing.common.dto.MeterPointNode child : node.getChildPoints()) {
+                Boolean found = findIsDienMt(child, meterPointId);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
     }
 }

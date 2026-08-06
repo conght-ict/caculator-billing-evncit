@@ -1,0 +1,550 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": "-- Grafana --",
+        "enable": true,
+        "hide": true,
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": false,
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 3, "w": 4, "x": 0, "y": 0 },
+      "id": 1,
+      "title": "🟢 Uptime Worker",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "up{job=\"billing-worker\"}",
+          "legendFormat": "Worker State",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "DOWN", "color": "red" },
+                "1": { "text": "UP", "color": "green" }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 3, "w": 4, "x": 4, "y": 0 },
+      "id": 2,
+      "title": "🟢 Uptime Mediation",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "up{job=\"mediation-service\"}",
+          "legendFormat": "Mediation State",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "DOWN", "color": "red" },
+                "1": { "text": "UP", "color": "green" }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 3, "w": 4, "x": 8, "y": 0 },
+      "id": 3,
+      "title": "🟢 Uptime Snapshot Gen",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "up{job=\"snapshot-generator\"}",
+          "legendFormat": "Snapshot State",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "DOWN", "color": "red" },
+                "1": { "text": "UP", "color": "green" }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 3, "w": 6, "x": 12, "y": 0 },
+      "id": 4,
+      "title": "⚡ Tốc Độ Tính Cước Thành Công (HĐ/s)",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(billing_calculations_total{status=\"success\"}[1m])) or vector(0)",
+          "legendFormat": "Throughput (HĐ/s)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "yellow", "value": 50 },
+              { "color": "green", "value": 300 }
+            ]
+          },
+          "unit": "reqps"
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 3, "w": 6, "x": 18, "y": 0 },
+      "id": 5,
+      "title": "❌ Số Lỗi Tính Toán Cước (Lỗi/s)",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(billing_calculations_total{status=\"error\"}[1m])) or vector(0)",
+          "legendFormat": "Errors (Lỗi/s)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1 },
+              { "color": "red", "value": 5 }
+            ]
+          },
+          "unit": "reqps"
+        }
+      }
+    },
+    {
+      "collapsed": true,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 3 },
+      "id": 6,
+      "title": "💼 NGHIỆP VỤ TÍNH CƯỚC & ĐO ĐẾM (BUSINESS PERFORMANCE)",
+      "type": "row",
+      "panels": []
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 4 },
+      "id": 7,
+      "title": "📈 Biểu Đồ Tốc Độ Xử Lý Tính Cước (Calculations / sec)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(billing_calculations_total{status=\"success\"}[1m])) by (application)",
+          "legendFormat": "Thành công - {{application}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(billing_calculations_total{status=\"error\"}[1m])) by (application)",
+          "legendFormat": "Lỗi - {{application}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 15
+          },
+          "unit": "reqps"
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 4 },
+      "id": 8,
+      "title": "⏱️ Thời Gian Xử Lý Tính Cước Trung Bình (Billing Latency)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(billing_execution_time_seconds_sum[1m])) by (application) / sum(rate(billing_execution_time_seconds_count[1m])) by (application)",
+          "legendFormat": "Độ trễ trung bình - {{application}}",
+          "refId": "A"
+        },
+        {
+          "expr": "max(billing_execution_time_seconds_max) by (application)",
+          "legendFormat": "Độ trễ lớn nhất (Max) - {{application}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear"
+          },
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "collapsed": true,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 11 },
+      "id": 9,
+      "title": "🔄 SPRING BATCH PIPELINE MONITORING",
+      "type": "row",
+      "panels": []
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 12 },
+      "id": 10,
+      "title": "📊 Tốc Độ Xử Lý Step Trong Spring Batch (Items / sec)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(rate(spring_batch_step_read_count_total[1m]))",
+          "legendFormat": "Đọc (Read Rate)",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(spring_batch_step_write_count_total[1m]))",
+          "legendFormat": "Ghi (Write Rate)",
+          "refId": "B"
+        },
+        {
+          "expr": "sum(rate(spring_batch_step_failure_count_total[1m]))",
+          "legendFormat": "Step Lỗi (Failure Rate)",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "reqps"
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 12 },
+      "id": 11,
+      "title": "⏱️ Thời Gian Chạy Spring Batch Jobs (Job Durations)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "spring_batch_job_duration_seconds_sum / spring_batch_job_duration_seconds_count",
+          "legendFormat": "Job {{job_name}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "bar",
+            "fillOpacity": 20
+          },
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "collapsed": true,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 19 },
+      "id": 12,
+      "title": "📥 HÀNG ĐỢI KAFKA QUEUE & CONSUMER LAG",
+      "type": "row",
+      "panels": []
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 7, "w": 6, "x": 0, "y": 20 },
+      "id": 13,
+      "title": "📥 Tổng Độ Trễ Hàng Đợi (Consumer Lag)",
+      "type": "stat",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "sum(kafka_consumergroup_lag) or vector(0)",
+          "legendFormat": "Total Lag",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 10000 }
+            ]
+          },
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 7, "w": 18, "x": 6, "y": 20 },
+      "id": 14,
+      "title": "📊 Trễ Hàng Đợi Chi Tiết Theo Topic & Consumer Group (Lag / Partition)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "kafka_consumergroup_lag",
+          "legendFormat": "{{topic}} ({{group}}) - P{{partition}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "collapsed": true,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 27 },
+      "id": 15,
+      "title": "💾 KẾT NỐI CƠ SỞ DỮ LIỆU & HIKARICP POOL",
+      "type": "row",
+      "panels": []
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 28 },
+      "id": 16,
+      "title": "💾 Trạng Thái Connection Pool (HikariCP Active / Idle / Pending)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "hikaricp_connections_active",
+          "legendFormat": "Active - Pool: {{pool}}",
+          "refId": "A"
+        },
+        {
+          "expr": "hikaricp_connections_idle",
+          "legendFormat": "Idle - Pool: {{pool}}",
+          "refId": "B"
+        },
+        {
+          "expr": "hikaricp_connections_pending",
+          "legendFormat": "Pending (Threads Waiting) - {{pool}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear"
+          },
+          "unit": "short"
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 28 },
+      "id": 17,
+      "title": "⏱️ Thời Gian Mượn Kết Nối CSDL (HikariCP Connection Acquire Latency)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "hikaricp_connections_acquire_seconds_sum / hikaricp_connections_acquire_seconds_count",
+          "legendFormat": "Delay - {{pool}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line"
+          },
+          "unit": "s"
+        }
+      }
+    },
+    {
+      "collapsed": true,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 35 },
+      "id": 18,
+      "title": "🧠 TÀI NGUYÊN HỆ THỐNG & TẢI JVM (JVM & CPU RESOURCES)",
+      "type": "row",
+      "panels": []
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 7, "w": 8, "x": 0, "y": 36 },
+      "id": 19,
+      "title": "🖥️ Tỉ Lệ Tiêu Thụ CPU (JVM vs System CPU Usage)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "process_cpu_usage * 100",
+          "legendFormat": "Process CPU - {{application}}",
+          "refId": "A"
+        },
+        {
+          "expr": "system_cpu_usage * 100",
+          "legendFormat": "System CPU - {{application}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth"
+          },
+          "unit": "percent"
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 7, "w": 8, "x": 8, "y": 36 },
+      "id": 20,
+      "title": "🧠 Tiêu Thụ Bộ Nhớ JVM Heap (JVM Heap Memory Usage)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "jvm_memory_used_bytes{area=\"heap\"}",
+          "legendFormat": "Heap Used - {{application}}",
+          "refId": "A"
+        },
+        {
+          "expr": "jvm_memory_max_bytes{area=\"heap\"}",
+          "legendFormat": "Heap Max - {{application}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          },
+          "unit": "bytes"
+        }
+      }
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 7, "w": 8, "x": 16, "y": 36 },
+      "id": 21,
+      "title": "🧵 Số Luồng Hoạt Động (JVM Live Threads)",
+      "type": "timeseries",
+      "datasource": "Prometheus",
+      "targets": [
+        {
+          "expr": "jvm_threads_live_threads",
+          "legendFormat": "Threads - {{application}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line"
+          },
+          "unit": "short"
+        }
+      }
+    }
+  ],
+  "refresh": "5s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": ["evn-billing", "production-like", "grafana-dashboard", "comprehensive"],
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m"]
+  },
+  "timezone": "browser",
+  "title": "⚡ EVN Billing Enterprise Monitoring Dashboard",
+  "uid": "evn-billing-comprehensive-dash"
+}

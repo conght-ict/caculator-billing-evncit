@@ -6,11 +6,15 @@ import java.time.LocalDateTime;
 
 @Data
 public class CmisReadingEvent {
-    private String accountId;
-    private String meterPointId;
-    private BigDecimal startIndex;
-    private BigDecimal endIndex;
-    private String billingCycleMonth; // Format: YYYY_MM_Period (e.g. 2026_06_1)
-    private LocalDateTime fromDate;
-    private LocalDateTime toDate;
+    private String maKhang;
+    private String maDdo;
+    private BigDecimal chiSoDau;
+    private BigDecimal chiSoCuoi;
+    private String thangChuKy; // Format: YYYY_MM_Period (e.g. 2026_06_1)
+    private LocalDateTime tuNgay;
+    private LocalDateTime denNgay;
+    private String maCto;
+    private Integer soLanQuayVong = 1;
+    private String nguonGhi = "AMR";
+    private String tgianBdien = "BT";
 }

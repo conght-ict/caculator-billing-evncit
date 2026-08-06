@@ -1,434 +1,490 @@
 -- =========================================================================
--- DATABASE INITIALIZATION SCRIPT v3.0
--- EVN National Billing System — Optimized Schema with Consolidated Run State
--- =========================================================================
--- Constraint Matrix applied in this file:
---   [I.1]  Append-Only: record_type ORIGINAL/CORRECTION, no UPDATE on raw readings
---   [I.2]  Monotonically Increasing: CHECK(to_date > from_date), is_rollover, max_register_value
---   [I.3]  Deduplication: UNIQUE(meter_point_id, from_date, to_date) for ORIGINAL records
---   [II.1] Snapshot Isolation: NO Foreign Keys to Master Data tables
---   [II.2] Self-Containment: JSONB must contain 6 required fields; Malform -> DLQ
---   [III.1] Locality Sharding: Kafka Partition Key = Account_ID (documented in code layer)
---   [III.2] Backpressure: max.poll.records=50, Pause/Resume at buffer>500 (app config)
---   [IV.1] Idempotency: UNIQUE(idempotency_key) + UPSERT ON CONFLICT (documented)
---   [IV.2] Self-Explainability: billing_manifest JSONB NOT NULL (includes rounding_mode)
+-- DATABASE INITIALIZATION SCRIPT v5.0 (Vietnamese Schema - JSONB Optimized)
+-- EVN National Billing System — Optimized Schema aligned with CMIS Conventions
 -- =========================================================================
 
--- =========================================================================
--- GROUP 0: MASTER DATA (Static, ACID, Low mutation rate)
--- =========================================================================
-
--- 0a. Meter Model Catalog [Q1: Register Rollover threshold per hardware model]
-CREATE TABLE meter_model (
-    model_code          VARCHAR(50) PRIMARY KEY,
-    manufacturer        VARCHAR(100) NOT NULL,
-    model_name          VARCHAR(100) NOT NULL,
-    max_register_value  DECIMAL(14,2) NOT NULL DEFAULT 99999.9,
-    -- [I.2] Physical rollover threshold (e.g., 99999.9 kWh for 5-digit meters)
-    display_digits      INT NOT NULL DEFAULT 5,
-    meter_type          VARCHAR(20) NOT NULL DEFAULT 'MECHANICAL',
-    -- MECHANICAL | ELECTRONIC | SMART_AMI
-    created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
--- 1. Account (Master, Shard by account_id)
-CREATE TABLE account (
-    account_id          VARCHAR(50) PRIMARY KEY,
-    book_id             VARCHAR(50) NOT NULL,
-    customer_name       VARCHAR(100) NOT NULL,
-    status              VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
-    norms_factor        INT NOT NULL DEFAULT 1,
-    address             TEXT,
+-- 1. Khách Hàng (Tối giản các trường phi tính toán)
+CREATE TABLE khach_hang (
+    ma_khang            VARCHAR(50) PRIMARY KEY,
+    ten_khang           VARCHAR(200) NOT NULL,
+    trang_thai          VARCHAR(20) NOT NULL DEFAULT 'ACTIVE', -- ACTIVE | SUSPENDED
+    dia_chi             TEXT,
+    dien_thoai          VARCHAR(50),
+    email               VARCHAR(100),
+    ma_so_thue          VARCHAR(50),
+    ma_dviqly           VARCHAR(20) NOT NULL DEFAULT 'PD0600', -- [MỚI] Mã đơn vị quản lý
     created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_account_book ON account(book_id);
 
--- 1b. Book Billing Schedule & Run Progress (Consolidated Schedule & Execution State) [Q2/Q3]
-CREATE TABLE book_billing_schedule (
-    book_id             VARCHAR(50) NOT NULL,
-    billing_cycle_month VARCHAR(20) NOT NULL, -- Format: YYYY_MM (e.g., '2026_06')
-    period              INT NOT NULL DEFAULT 1, -- Kỳ thứ mấy trong tháng (1, 2, 3...)
-    from_date           DATE NOT NULL, -- Ngày bắt đầu kỳ cước
-    to_date             DATE NOT NULL, -- Ngày chốt kỳ cước
+-- 2. Lịch Ghi Đối Tượng Quản Lý (lich_ghi_dqly)
+CREATE TABLE lich_ghi_dqly (
+    dtuong_qly          VARCHAR(50) NOT NULL,
+    thang_ck            VARCHAR(10) NOT NULL, -- Định dạng: YYYY_MM (ví dụ: '2026_06')
+    ky_chot             INT NOT NULL DEFAULT 1, -- Kỳ thứ mấy trong tháng (1, 2, 3...)
+    tu_ngay             DATE NOT NULL, -- Ngày bắt đầu kỳ cước
+    den_ngay            DATE NOT NULL, -- Ngày chốt kỳ cước
+    n_tru               INT NOT NULL DEFAULT 1, -- Số ngày cho phép ghi sớm (N-1)
+    n_cong              INT NOT NULL DEFAULT 1, -- Số ngày cho phép ghi muộn (N+1)
+    ma_dviqly           VARCHAR(20) NOT NULL DEFAULT 'PD0600', -- [MỚI] Mã đơn vị quản lý
     
-    status              VARCHAR(20) NOT NULL DEFAULT 'ACTIVE', -- ACTIVE | CLOSED
-    run_status          VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-    -- PENDING | SNAPSHOT_GENERATING | PROCESSING | COMPLETED | FAILED
-    total_accounts      INT DEFAULT 0,
-    processed_accounts  INT DEFAULT 0,
-    success_accounts    INT DEFAULT 0,
-    failed_accounts     INT DEFAULT 0,
-    triggered_by        VARCHAR(20) DEFAULT 'CMIS',
+    tthai_lich          VARCHAR(20) NOT NULL DEFAULT 'ACTIVE', -- ACTIVE | CLOSED
+    tthai_chay          VARCHAR(20) NOT NULL DEFAULT 'PENDING', -- PENDING | PROCESSING | COMPLETED | FAILED
+    
+    tong_kh             INT DEFAULT 0,
+    kh_da_xl            INT DEFAULT 0,
+    kh_tc               INT DEFAULT 0,
+    kh_tb               INT DEFAULT 0,
+    nguon               VARCHAR(20) DEFAULT 'CMIS',
     
     created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (book_id, billing_cycle_month, period),
-    CONSTRAINT chk_book_schedule_dates CHECK (to_date >= from_date)
+    PRIMARY KEY (dtuong_qly, thang_ck, ky_chot),
+    CONSTRAINT chk_lich_dqly_dates CHECK (den_ngay >= tu_ngay)
 );
 
--- 2. Meter Point (Master, References meter_model for rollover spec)
-CREATE TABLE meter_point (
-    meter_point_id      VARCHAR(50) PRIMARY KEY,
-    account_id          VARCHAR(50) NOT NULL REFERENCES account(account_id),
-    model_code          VARCHAR(50) REFERENCES meter_model(model_code),
-    tariff_code         VARCHAR(50) NOT NULL,
-    status              VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
-    meter_serial        VARCHAR(100),
-    installed_date      DATE,
-    decommission_date   DATE
+-- 3. Điểm Đo (Tối ưu hóa ZERO JOIN: Công tơ và Áp giá dạng JSONB)
+CREATE TABLE dm_loai_ddo (
+    loai_ddo    SMALLINT NOT NULL,
+    loai_bcs    VARCHAR(5) NOT NULL,
+    mo_ta       VARCHAR(100),
+    PRIMARY KEY (loai_ddo, loai_bcs)
 );
-CREATE INDEX idx_meter_point_account ON meter_point(account_id);
 
--- 3. Meter Relation (Topology DAG)
-CREATE TABLE meter_relation (
-    relation_id     BIGSERIAL PRIMARY KEY,
-    parent_id       VARCHAR(50) NOT NULL REFERENCES meter_point(meter_point_id),
-    child_id        VARCHAR(50) NOT NULL REFERENCES meter_point(meter_point_id),
-    relation_type   VARCHAR(20) NOT NULL,
-    -- NETTING | AGGREGATION
-    effective_from  DATE NOT NULL DEFAULT CURRENT_DATE,
-    effective_to    DATE,
-    CONSTRAINT chk_different_meters CHECK (parent_id <> child_id)
+INSERT INTO dm_loai_ddo (loai_ddo, loai_bcs, mo_ta) VALUES
+(1, 'KT', '1 giá - Tổng'),
+(2, 'BT', '2 giá - Bình thường'), (2, 'TD', '2 giá - Thấp điểm'),
+(3, 'BT', '3 giá - Bình thường'), (3, 'CD', '3 giá - Cao điểm'), (3, 'TD', '3 giá - Thấp điểm'),
+(4, 'KT', '1 giá + VC'), (4, 'VC', '1 giá + VC'),
+(5, 'BT', '2 giá + VC'), (5, 'TD', '2 giá + VC'), (5, 'VC', '2 giá + VC'),
+(6, 'BT', '3 giá + VC'), (6, 'CD', '3 giá + VC'), (6, 'TD', '3 giá + VC'), (6, 'VC', '3 giá + VC');
+
+CREATE TABLE diem_do (
+    ma_ddo              VARCHAR(50) PRIMARY KEY,
+    ma_khang            VARCHAR(50) NOT NULL REFERENCES khach_hang(ma_khang),
+    dtuong_qly          VARCHAR(50) NOT NULL, -- Sổ ghi chỉ số chốt cước
+    ma_capda            VARCHAR(20) NOT NULL, -- HẠ ÁP | TRUNG ÁP | CAO ÁP
+    trang_thai          VARCHAR(20) NOT NULL DEFAULT 'ACTIVE', -- ACTIVE | INACTIVE
+    loai_ddo            SMALLINT NOT NULL DEFAULT 1,
+    loai_khang          SMALLINT,
+    is_dien_mt          BOOLEAN NOT NULL DEFAULT FALSE,
+    thong_tin_cto       JSONB NOT NULL DEFAULT '[]'::jsonb, -- Danh sách công tơ treo tháo dạng JSONB Array
+    danh_sach_ap_gia    JSONB NOT NULL,       -- Mảng các đối tượng áp giá (ma_nhomnn, ma_nn, ma_ngia, tgian_bdien...)
+    ma_dviqly           VARCHAR(20) NOT NULL DEFAULT 'PD0600', -- [MỚI] Mã đơn vị quản lý
+    created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_meter_relation_parent ON meter_relation(parent_id);
+CREATE INDEX idx_diem_do_khang ON diem_do(ma_khang);
+CREATE INDEX idx_diem_do_dqly ON diem_do(dtuong_qly);
+CREATE INDEX idx_diem_do_ap_gia ON diem_do USING GIN (danh_sach_ap_gia);
 
--- =========================================================================
--- GROUP Metadata: TARIFF RULES (Temporal Validity) [Q3]
--- =========================================================================
-
--- 4. Tariff with effective_date + expiry_date for GetTariffAt(target_date)
-CREATE TABLE tariff (
-    tariff_code     VARCHAR(50) PRIMARY KEY,
-    name            VARCHAR(100) NOT NULL,
-    type            VARCHAR(20) NOT NULL,
-    -- STEPPING | FLAT | TOU
-    effective_date  DATE NOT NULL,
-    expiry_date     DATE,
-    -- NULL = currently active
-    issued_by       VARCHAR(300),
-    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+-- 3b. Lịch Ghi Điểm Đo (lich_ghi_ddo)
+CREATE TABLE lich_ghi_ddo (
+    ma_ddo              VARCHAR(50) NOT NULL REFERENCES diem_do(ma_ddo),
+    thang_ck            VARCHAR(10) NOT NULL, -- Định dạng: YYYY_MM
+    ky_chot             INT NOT NULL DEFAULT 1,
+    tu_ngay             DATE NOT NULL,
+    den_ngay            DATE NOT NULL,
+    tthai_lich          VARCHAR(20) NOT NULL DEFAULT 'ACTIVE', -- ACTIVE | CLOSED
+    created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (ma_ddo, thang_ck, ky_chot),
+    CONSTRAINT chk_lich_ddo_dates CHECK (den_ngay >= tu_ngay)
 );
-CREATE INDEX idx_tariff_temporal ON tariff(type, effective_date, expiry_date);
 
--- 5. Tariff Detail (Price blocks)
-CREATE TABLE tariff_detail (
-    detail_id       BIGSERIAL PRIMARY KEY,
-    tariff_code     VARCHAR(50) NOT NULL REFERENCES tariff(tariff_code) ON DELETE CASCADE,
-    step            INT NOT NULL,
-    min_kwh         DECIMAL(12,2) NOT NULL,
-    max_kwh         DECIMAL(12,2),
-    unit_price      DECIMAL(12,2) NOT NULL,
-    tou_period      VARCHAR(20)
-    -- PEAK | OFF_PEAK | NORMAL (for TOU type only)
+-- 4. Quan Hệ Điểm Đo (Biểu diễn cây công tơ phụ tải netting)
+CREATE TABLE quan_he_diem_do (
+    id_quan_he          BIGSERIAL PRIMARY KEY,
+    ma_ddo_cha          VARCHAR(50) NOT NULL REFERENCES diem_do(ma_ddo),
+    ma_ddo_con          VARCHAR(50) NOT NULL REFERENCES diem_do(ma_ddo),
+    loai_quan_he        VARCHAR(20) DEFAULT 'NETTING',
+    ngay_hieu_luc       DATE NOT NULL DEFAULT CURRENT_DATE,
+    ngay_het_han        DATE,
+    CONSTRAINT chk_different_meters CHECK (ma_ddo_cha <> ma_ddo_con)
 );
-CREATE INDEX idx_tariff_detail_code ON tariff_detail(tariff_code, step);
+CREATE INDEX idx_qh_ddo_cha ON quan_he_diem_do(ma_ddo_cha);
 
--- =========================================================================
--- GROUP I: USAGE / TELEMETRY DATA (Write-heavy, Append-Only, Partitioned)
--- =========================================================================
+-- 5. Cấu Hình Biểu Giá (Lưu các bậc thang dạng JSONB để nạp O(1) Memory Cache)
+CREATE TABLE bieu_gia (
+    ma_bieu_gia         VARCHAR(50) PRIMARY KEY,
+    ten_bieu_gia        VARCHAR(200) NOT NULL,
+    loai_bieu_gia       VARCHAR(20) NOT NULL, -- STEPPING | FLAT | TOU
+    ngay_hieu_luc       DATE NOT NULL,
+    ngay_het_han        DATE,
+    quyet_dinh_phap_ly  VARCHAR(300),
+    chi_tiet_gia        JSONB NOT NULL, -- Mảng các bậc thang [TariffBlock] (step, minKwh, maxKwh, unitPrice...)
+    created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_bieu_gia_temporal ON bieu_gia(loai_bieu_gia, ngay_hieu_luc, ngay_het_han);
 
--- 6. Meter Usage (Partitioned by billing_cycle_month)
-CREATE TABLE meter_usage (
-    usage_id                BIGINT NOT NULL,
-    sub_reading_seq         INT NOT NULL DEFAULT 1,
-    -- [I.2 Edge Case] Meter replacement mid-period: seq=1 old meter, seq=2 new meter
+-- 6. Chỉ Số Điện Năng (Áp dụng Partition theo thang_chu_ky)
+CREATE TABLE chi_so_dien_nang (
+    id_chi_so               BIGINT NOT NULL,
+    lan_doc_phu             INT NOT NULL DEFAULT 1, -- Thứ tự thay thế công tơ giữa chu kỳ
 
-    account_id              VARCHAR(50) NOT NULL,
-    meter_point_id          VARCHAR(50) NOT NULL,
-    billing_cycle_month     VARCHAR(20) NOT NULL,
-    period                  INT NOT NULL DEFAULT 1,
+    ma_khang                VARCHAR(50) NOT NULL,
+    ma_ddo                  VARCHAR(50) NOT NULL,
+    thang_chu_ky            VARCHAR(20) NOT NULL,
+    ky_chot                 INT NOT NULL DEFAULT 1,
 
-    from_date               TIMESTAMP NOT NULL,
-    to_date                 TIMESTAMP NOT NULL,
-    CONSTRAINT chk_meter_usage_date_order CHECK (to_date > from_date),
-    -- [I.2] Monotonically Increasing time constraint
+    tu_ngay                 TIMESTAMP NOT NULL,
+    den_ngay                TIMESTAMP NOT NULL,
+    CONSTRAINT chk_cs_dates CHECK (den_ngay > tu_ngay),
 
-    start_index             DECIMAL(14,2) NOT NULL,
-    end_index               DECIMAL(14,2) NOT NULL,
+    chi_so_dau              DECIMAL(14,2) NOT NULL,
+    chi_so_cuoi             DECIMAL(14,2) NOT NULL,
 
-    is_rollover             BOOLEAN NOT NULL DEFAULT FALSE,
-    -- [I.2] TRUE when end_index < start_index due to hardware counter reset
-    max_register_snapshot   DECIMAL(14,2),
-    -- Snapshot of meter_model.max_register_value AT TIME OF READING
+    co_quay_vong            BOOLEAN NOT NULL DEFAULT FALSE,
+    san_luong_tho           DECIMAL(14,2) NOT NULL,
 
-    raw_consumption         DECIMAL(14,2) NOT NULL,
-    -- Pre-computed by Mediation, stored to avoid re-computation
+    trang_thai_xu_ly        VARCHAR(20) NOT NULL DEFAULT 'PENDING_MANUAL', -- PENDING_MANUAL | VALIDATED | TELEMETRY
 
-    status                  VARCHAR(20) NOT NULL DEFAULT 'PENDING_MANUAL',
-    -- PENDING_MANUAL | VALIDATED | TELEMETRY
+    loai_ghi_index          VARCHAR(20) NOT NULL DEFAULT 'ORIGINAL', -- ORIGINAL | CORRECTION
+    id_chi_so_dieu_chinh    BIGINT,
 
-    record_type             VARCHAR(20) NOT NULL DEFAULT 'ORIGINAL',
-    -- [I.1] ORIGINAL: first reading | CORRECTION: operator override (append, not update)
-    correction_of_usage_id  BIGINT,
-    -- [I.1] Soft FK to corrected record (no physical FK for audit isolation)
-
-    source                  VARCHAR(20) NOT NULL DEFAULT 'AMR',
-    -- AMR | HANDHELD | MANUAL
-
+    nguon_ghi               VARCHAR(20) NOT NULL DEFAULT 'AMR', -- AMR | HANDHELD | MANUAL
+    tgian_bdien             VARCHAR(10) NOT NULL DEFAULT 'BT', -- BT (Bình thường) | CD | TD
     created_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    PRIMARY KEY (usage_id, sub_reading_seq, billing_cycle_month, period)
-) PARTITION BY RANGE (billing_cycle_month);
+    PRIMARY KEY (id_chi_so, lan_doc_phu, thang_chu_ky)
+) PARTITION BY LIST (thang_chu_ky);
 
--- [I.3] Deduplication: Prevent overlapping time-ranges for same meter point
-CREATE UNIQUE INDEX uq_meter_usage_no_overlap
-    ON meter_usage (meter_point_id, from_date, to_date);
+-- Đảm bảo không trùng khoảng thời gian ghi của cùng điểm đo
+CREATE UNIQUE INDEX uq_chi_so_dien_nang_no_overlap
+    ON chi_so_dien_nang (ma_ddo, tu_ngay, den_ngay, thang_chu_ky);
 
--- Partitions
-CREATE TABLE meter_usage_2026_06 PARTITION OF meter_usage FOR VALUES FROM ('2026_06') TO ('2026_07');
-CREATE TABLE meter_usage_2026_07 PARTITION OF meter_usage FOR VALUES FROM ('2026_07') TO ('2026_08');
-CREATE TABLE meter_usage_2026_08 PARTITION OF meter_usage FOR VALUES FROM ('2026_08') TO ('2026_09');
+-- Các bảng phân vùng (Partitions) cho chi_so_dien_nang
+CREATE TABLE chi_so_dien_nang_2026_06 PARTITION OF chi_so_dien_nang FOR VALUES IN ('2026_06');
+CREATE TABLE chi_so_dien_nang_2026_07 PARTITION OF chi_so_dien_nang FOR VALUES IN ('2026_07');
+CREATE TABLE chi_so_dien_nang_2026_08 PARTITION OF chi_so_dien_nang FOR VALUES IN ('2026_08');
+CREATE TABLE chi_so_dien_nang_default PARTITION OF chi_so_dien_nang DEFAULT;
 
-CREATE INDEX idx_meter_usage_lookup ON meter_usage(account_id, billing_cycle_month, status);
-CREATE INDEX idx_meter_usage_point  ON meter_usage(meter_point_id, billing_cycle_month);
+CREATE INDEX idx_cs_dien_nang_lookup ON chi_so_dien_nang(ma_khang, thang_chu_ky, trang_thai_xu_ly);
+CREATE INDEX idx_cs_dien_nang_ddo    ON chi_so_dien_nang(ma_ddo, thang_chu_ky);
 
--- =========================================================================
--- GROUP II: SNAPSHOT DATA (Frozen, Read-Only, Self-Contained JSONB)
--- =========================================================================
+-- 7. Snapshot Tính Toán (Materialized Snapshots)
+CREATE TABLE snapshot_tinh_toan (
+    id_snapshot             VARCHAR(200) PRIMARY KEY, -- Định dạng: {ma_khang}_{thang_chu_ky}_p{ky_chot}_v{phien_ban_tinh}
+    ma_khang                VARCHAR(50) NOT NULL,
+    dtuong_qly              VARCHAR(50) NOT NULL,
+    thang_chu_ky            VARCHAR(20) NOT NULL,
+    ky_chot                 INT NOT NULL DEFAULT 1,
+    phien_ban_tinh          INT NOT NULL DEFAULT 1,
+    trang_thai              VARCHAR(20) NOT NULL DEFAULT 'DRAFT', -- DRAFT | LOCKED | DEPRECATED
+    phien_ban_luat_cuoc     VARCHAR(50) NOT NULL DEFAULT '2026.08',
+    ma_dviqly               VARCHAR(20) NOT NULL DEFAULT 'PD0600', -- [MỚI] Mã đơn vị quản lý
 
--- 7. Billing Account Snapshot [II.1: No FK, II.2: Self-Contained JSONB]
-CREATE TABLE billing_account_snapshot (
-    snapshot_id             VARCHAR(200) PRIMARY KEY,
-    -- Format: {account_id}_{billing_cycle_month}_p{period}_v{version}
-
-    account_id              VARCHAR(50) NOT NULL,
-    -- [II.1] NO REFERENCES: physically decoupled from Master Data tables
-    book_id                 VARCHAR(50) NOT NULL,
-    billing_cycle_month     VARCHAR(20) NOT NULL,
-    period                  INT NOT NULL DEFAULT 1,
-    calculation_version     INT NOT NULL DEFAULT 1,
-
-    effective_sync_date     DATE NOT NULL,
-    config_data             JSONB NOT NULL,
-    -- [II.2] Self-Contained: MUST include all 6 required fields:
-    --   1. account_id  2. book_id  3. norms_factor
-    --   4. effective_sync_date  5. meter_topology  6. tariffs
-
+    ngay_dong_bo_hieu_luc   DATE NOT NULL,
+    du_lieu_cau_hinh        JSONB NOT NULL, -- Chứa cấu hình đóng băng bao gồm cả cây điểm đo và các biên bản áp giá
     created_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-CREATE UNIQUE INDEX idx_snapshot_composite
-    ON billing_account_snapshot(account_id, billing_cycle_month, period, calculation_version);
-CREATE INDEX idx_snapshot_book
-    ON billing_account_snapshot(book_id, billing_cycle_month, period);
-CREATE INDEX idx_snapshot_jsonb
-    ON billing_account_snapshot USING GIN (config_data);
+-- Trigger function to enforce Snapshot Lock Rule
+CREATE OR REPLACE FUNCTION tg_prevent_locked_snapshot_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF (OLD.trang_thai = 'LOCKED') THEN
+        RAISE EXCEPTION 'Cannot modify or delete a LOCKED snapshot (id_snapshot = %). Ensure snapshot is isolation-guaranteed.', OLD.id_snapshot;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
 
--- =========================================================================
--- GROUP IV: TRANSACTIONAL / OUTPUT DATA (Idempotent, Partitioned)
--- =========================================================================
+CREATE TRIGGER trg_prevent_locked_snapshot_mutation
+BEFORE UPDATE OR DELETE ON snapshot_tinh_toan
+FOR EACH ROW EXECUTE FUNCTION tg_prevent_locked_snapshot_mutation();
 
--- 8. Bill Invoice [IV.1: Idempotency, IV.2: Self-Explainability]
-CREATE TABLE bill_invoice (
-    invoice_id              VARCHAR(100) NOT NULL,
-    account_id              VARCHAR(50) NOT NULL,
-    book_id                 VARCHAR(50) NOT NULL,
-    billing_cycle_month     VARCHAR(20) NOT NULL,
-    period                  INT NOT NULL DEFAULT 1,
-    total_amount_before_tax DECIMAL(15,2) NOT NULL,
-    tax_amount              DECIMAL(15,2) NOT NULL,
-    total_amount_after_tax  DECIMAL(15,2) NOT NULL,
+CREATE UNIQUE INDEX idx_snapshot_tinh_toan_composite
+    ON snapshot_tinh_toan(ma_khang, thang_chu_ky, ky_chot, phien_ban_tinh);
+CREATE INDEX idx_snapshot_tinh_toan_dqly
+    ON snapshot_tinh_toan(dtuong_qly, thang_chu_ky, ky_chot);
+CREATE INDEX idx_snapshot_tinh_toan_jsonb
+    ON snapshot_tinh_toan USING GIN (du_lieu_cau_hinh);
 
-    idempotency_key         VARCHAR(200) NOT NULL,
-    -- [IV.1] = account_id + '_' + billing_cycle_month + '_p' + period + '_v' + calculation_version
-    -- Worker MUST use UPSERT: INSERT ... ON CONFLICT (idempotency_key) DO UPDATE
+-- 8. Hóa Đơn (Tích hợp chi tiết tính cước thành cột JSONB - Phân vùng theo thang_chu_ky)
+CREATE TABLE hoa_don (
+    id_hoa_don              VARCHAR(100) NOT NULL,
+    ma_khang                VARCHAR(50) NOT NULL,
+    ma_sogcs                VARCHAR(50) NOT NULL, -- dtuong_qly
+    thang_chu_ky            VARCHAR(20) NOT NULL,
+    ky_chot                 INT NOT NULL DEFAULT 1,
+    tong_tien_truoc_thue    DECIMAL(15,2) NOT NULL,
+    tien_thue               DECIMAL(15,2) NOT NULL,
+    tong_tien_sau_thue      DECIMAL(15,2) NOT NULL,
+    ma_dviqly               VARCHAR(20) NOT NULL DEFAULT 'PD0600', -- [MỚI] Mã đơn vị quản lý
 
-    billing_manifest        JSONB NOT NULL,
-    -- [IV.2] NEVER NULL. Contains:
-    --   topology_calculation (sub_readings, is_rollover, net_consumption)
-    --   rating_breakdown (steps, amounts, norms_factor applied)
-    --   tax_calculation (vat_rate, rounding_mode: HALF_UP, tax_amount_final)
-    --   total_final_amount, calculation_engine_version, snapshot_applied
-
-    proration_applied       BOOLEAN NOT NULL DEFAULT FALSE,
-    snapshot_ref            VARCHAR(200),
-    calculation_status      VARCHAR(20) NOT NULL DEFAULT 'FINAL',
+    khoa_lap_trung           VARCHAR(200) NOT NULL, -- idempotency_key
+    ban_ke_tinh_toan        JSONB NOT NULL, -- Manifest chi tiết bậc thang, thuế, phân bổ
+    ap_dung_phan_bo         BOOLEAN NOT NULL DEFAULT FALSE,
+    ref_snapshot            VARCHAR(200),
+    trang_thai_tinh_toan    VARCHAR(20) NOT NULL DEFAULT 'FINAL',
 
     created_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
-    PRIMARY KEY (invoice_id, billing_cycle_month),
-    CONSTRAINT uq_idempotency_invoice UNIQUE (idempotency_key)
-) PARTITION BY RANGE (billing_cycle_month);
+    PRIMARY KEY (id_hoa_don, thang_chu_ky),
+    CONSTRAINT uq_idempotency_hoa_don UNIQUE (khoa_lap_trung, thang_chu_ky)
+) PARTITION BY LIST (thang_chu_ky);
 
-CREATE TABLE bill_invoice_2026_06 PARTITION OF bill_invoice FOR VALUES FROM ('2026_06') TO ('2026_07');
-CREATE TABLE bill_invoice_2026_07 PARTITION OF bill_invoice FOR VALUES FROM ('2026_07') TO ('2026_08');
-CREATE TABLE bill_invoice_2026_08 PARTITION OF bill_invoice FOR VALUES FROM ('2026_08') TO ('2026_09');
+-- Các bảng phân vùng cho hoa_don
+CREATE TABLE hoa_don_2026_06 PARTITION OF hoa_don FOR VALUES IN ('2026_06');
+CREATE TABLE hoa_don_2026_07 PARTITION OF hoa_don FOR VALUES IN ('2026_07');
+CREATE TABLE hoa_don_2026_08 PARTITION OF hoa_don FOR VALUES IN ('2026_08');
+CREATE TABLE hoa_don_default PARTITION OF hoa_don DEFAULT;
 
-CREATE INDEX idx_invoice_account ON bill_invoice(account_id, billing_cycle_month);
-CREATE INDEX idx_invoice_book    ON bill_invoice(book_id, billing_cycle_month);
+CREATE INDEX idx_hoa_don_khang ON hoa_don(ma_khang, thang_chu_ky);
+CREATE INDEX idx_hoa_don_dqly ON hoa_don(ma_sogcs, thang_chu_ky);
 
--- =========================================================================
--- GROUP: INTEGRATION & AUDIT TABLES
--- =========================================================================
-
--- 9. Transactional Outbox (Written in SAME tx as bill_invoice)
-CREATE TABLE outbox_event (
-    event_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    aggregate_type  VARCHAR(50) NOT NULL,
-    aggregate_id    VARCHAR(100) NOT NULL,
-    event_type      VARCHAR(50) NOT NULL,
-    payload         JSONB NOT NULL,
-    status          VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+-- 9. Sự Kiện Outbox
+CREATE TABLE su_kien_outbox (
+    id_su_kien      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    loai_doi_tuong  VARCHAR(50) NOT NULL, -- aggregate_type
+    id_doi_tuong    VARCHAR(100) NOT NULL, -- aggregate_id
+    loai_su_kien    VARCHAR(50) NOT NULL, -- event_type
+    noi_dung        JSONB NOT NULL, -- payload
+    trang_thai      VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_outbox_pending ON outbox_event(status, created_at) WHERE status = 'PENDING';
+CREATE UNIQUE INDEX uq_outbox_business_event
+    ON su_kien_outbox(loai_doi_tuong, id_doi_tuong, loai_su_kien);
+CREATE INDEX idx_outbox_pending ON su_kien_outbox(trang_thai, created_at) WHERE trang_thai = 'PENDING';
 
--- 10. Account Billing Status (Partitioned per-account progress and log audit details)
-CREATE TABLE account_billing_status (
-    account_id              VARCHAR(50) NOT NULL,
-    billing_cycle_month     VARCHAR(20) NOT NULL,
-    book_id                 VARCHAR(50) NOT NULL,
-    period                  INT NOT NULL DEFAULT 1,
-    status                  VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-    -- PENDING | PROCESSING | SUCCESS | FAILED | DLQ
-    invoice_id              VARCHAR(100),
-    error_message           TEXT,
-    retry_count             INT DEFAULT 0,
-    processing_time_ms      BIGINT,
-    worker_node             VARCHAR(100),
+-- 10. Trạng Thái Tính Toán Khách Hàng (Theo dõi trạng thái chốt tổng quát)
+CREATE TABLE trang_thai_tinh_toan_kh (
+    ma_khang                VARCHAR(50) NOT NULL,
+    thang_chu_ky            VARCHAR(20) NOT NULL,
+    dtuong_qly              VARCHAR(50) NOT NULL,
+    ky_chot                 INT NOT NULL DEFAULT 1,
+    trang_thai              VARCHAR(20) NOT NULL DEFAULT 'PENDING', -- PENDING | PROCESSING | SUCCESS | FAILED
+    id_hoa_don              VARCHAR(100),
+    thong_bao_loi           TEXT,
+    so_lan_thu_lai          INT DEFAULT 0,
+    thoi_gian_xu_ly_ms      BIGINT,
+    ten_worker              VARCHAR(100),
     updated_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (account_id, billing_cycle_month, period)
-) PARTITION BY LIST (billing_cycle_month);
+    PRIMARY KEY (ma_khang, thang_chu_ky, ky_chot)
+) PARTITION BY LIST (thang_chu_ky);
 
-CREATE TABLE account_billing_status_default PARTITION OF account_billing_status DEFAULT;
+CREATE TABLE trang_thai_tinh_toan_kh_2026_06 PARTITION OF trang_thai_tinh_toan_kh FOR VALUES IN ('2026_06');
+CREATE TABLE trang_thai_tinh_toan_kh_2026_07 PARTITION OF trang_thai_tinh_toan_kh FOR VALUES IN ('2026_07');
+CREATE TABLE trang_thai_tinh_toan_kh_2026_08 PARTITION OF trang_thai_tinh_toan_kh FOR VALUES IN ('2026_08');
+CREATE TABLE trang_thai_tinh_toan_kh_default PARTITION OF trang_thai_tinh_toan_kh DEFAULT;
 
-CREATE INDEX idx_acc_bill_status_book ON account_billing_status(book_id, billing_cycle_month, status);
+CREATE INDEX idx_trang_thai_tinh_toan_kh_dqly ON trang_thai_tinh_toan_kh(dtuong_qly, thang_chu_ky, trang_thai);
 
--- 11. Detailed Billing Calculation Log (For detail audit tracking of input consumptions and output manifest)
-CREATE TABLE billing_calculation_log (
-    log_id                  UUID PRIMARY KEY,
-    book_id                 VARCHAR(50) NOT NULL,
-    account_id              VARCHAR(50) NOT NULL,
-    billing_cycle_month     VARCHAR(20) NOT NULL,
-    period                  INT NOT NULL DEFAULT 1,
-    status                  VARCHAR(20) NOT NULL, -- SUCCESS | FAILED
-    input_data              JSONB,
-    output_data             JSONB,
-    error_message           TEXT,
-    created_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+
+
+-- 11b. Thay Đổi Cấu Hình Đang Chờ Xử Lý (pending_snapshot_change)
+CREATE TABLE pending_snapshot_change (
+    id_thay_doi         BIGSERIAL PRIMARY KEY,
+    ma_khang            VARCHAR(50) NOT NULL,
+    thang_chu_ky        VARCHAR(20) NOT NULL,
+    ky_chot             INT NOT NULL DEFAULT 1,
+    rule_id             VARCHAR(10) NOT NULL,
+    bang_nguon          VARCHAR(50) NOT NULL,
+    truong_thay_doi     TEXT NOT NULL,
+    du_lieu_cu          JSONB,
+    du_lieu_moi         JSONB,
+    trang_thai          VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    grace_expires_at    TIMESTAMP NOT NULL,
+    created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    processed_at        TIMESTAMP
 );
-CREATE INDEX idx_calc_log_book ON billing_calculation_log(book_id, billing_cycle_month, period);
-CREATE INDEX idx_calc_log_account ON billing_calculation_log(account_id, billing_cycle_month, period);
+CREATE INDEX idx_pending_change_expire ON pending_snapshot_change(trang_thai, grace_expires_at) WHERE trang_thai = 'PENDING';
+CREATE INDEX idx_pending_change_khang ON pending_snapshot_change(ma_khang, thang_chu_ky, ky_chot);
+
 
 -- =========================================================================
--- SEED DATA
+-- SEED DATA - Dữ liệu giả lập chạy thử
 -- =========================================================================
 
--- Meter Models
-INSERT INTO meter_model (model_code, manufacturer, model_name, max_register_value, display_digits, meter_type) VALUES
-('MODEL_MECH_5D',   'Dien Co Thong Nhat', 'Cong to co 5 so',       99999.9,  5, 'MECHANICAL'),
-('MODEL_MECH_6D',   'Dien Co Thong Nhat', 'Cong to co 6 so',       999999.9, 6, 'MECHANICAL'),
-('MODEL_ELEC_5D',   'EDMI',               'Cong to dien tu 5 so',  99999.9,  5, 'ELECTRONIC'),
-('MODEL_SMART_AMI', 'Hexing',             'Cong to AMI thong minh', 9999999.9, 7, 'SMART_AMI');
+-- Biểu Giá (Tariffs - Tích hợp TariffBlock JSONB)
+INSERT INTO bieu_gia (ma_bieu_gia, ten_bieu_gia, loai_bieu_gia, ngay_hieu_luc, quyet_dinh_phap_ly, chi_tiet_gia) VALUES
+('TARIFF_SHBT_2023', 'Sinh hoạt bậc thang 2023', 'STEPPING', '2023-05-04', 'QD 648/QD-BCT 20/03/2023', 
+ '[{"step": 1, "minKwh": 0, "maxKwh": 50, "unitPrice": 1806.00}, 
+   {"step": 2, "minKwh": 50, "maxKwh": 100, "unitPrice": 1866.00}, 
+   {"step": 3, "minKwh": 100, "maxKwh": 200, "unitPrice": 2167.00}, 
+   {"step": 4, "minKwh": 200, "maxKwh": 300, "unitPrice": 2729.00}, 
+   {"step": 5, "minKwh": 300, "maxKwh": 400, "unitPrice": 3050.00}, 
+   {"step": 6, "minKwh": 400, "maxKwh": null, "unitPrice": 3157.00}]'::jsonb),
+('TARIFF_KDOANH_2023', 'Kinh doanh đồng giá 2023', 'FLAT', '2023-05-04', 'QD 648/QD-BCT 20/03/2023', 
+ '[{"step": 1, "minKwh": 0, "maxKwh": null, "unitPrice": 2500.00}]'::jsonb),
+('TARIFF_SX_2023', 'Sản xuất đồng giá 2023', 'FLAT', '2023-05-04', 'QD 648/QD-BCT 20/03/2023', 
+ '[{"step": 1, "minKwh": 0, "maxKwh": null, "unitPrice": 2000.00}]'::jsonb),
+('TARIFF_SX_BT', 'Sản xuất - Giờ Bình thường (TOU)', 'TOU', '2023-05-04', 'QD 648/QD-BCT 20/03/2023', 
+ '[{"step": 1, "minKwh": 0, "maxKwh": null, "unitPrice": 1800.00, "touPeriod": "NORMAL"}]'::jsonb),
+('TARIFF_SX_CD', 'Sản xuất - Giờ Cao điểm (TOU)', 'TOU', '2023-05-04', 'QD 648/QD-BCT 20/03/2023', 
+ '[{"step": 1, "minKwh": 0, "maxKwh": null, "unitPrice": 3200.00, "touPeriod": "PEAK"}]'::jsonb),
+('TARIFF_SX_TD', 'Sản xuất - Giờ Thấp điểm (TOU)', 'TOU', '2023-05-04', 'QD 648/QD-BCT 20/03/2023', 
+ '[{"step": 1, "minKwh": 0, "maxKwh": null, "unitPrice": 1100.00, "touPeriod": "OFF_PEAK"}]'::jsonb);
 
--- Tariffs (with Temporal Validity)
-INSERT INTO tariff (tariff_code, name, type, effective_date, expiry_date, issued_by) VALUES
-('TARIFF_SHBT_2023',   'Sinh hoat bac thang 2023',            'STEPPING', '2023-05-04', NULL, 'QD 648/QD-BCT 20/03/2023'),
-('TARIFF_KDOANH_2023', 'Kinh doanh dong gia 2023',            'FLAT',     '2023-05-04', NULL, 'QD 648/QD-BCT 20/03/2023'),
-('TARIFF_SX_2023',     'San xuat dong gia 2023',              'FLAT',     '2023-05-04', NULL, 'QD 648/QD-BCT 20/03/2023'),
-('TARIFF_SX_BT',       'San xuat - Gio Binh thuong (TOU)',    'TOU',      '2023-05-04', NULL, 'QD 648/QD-BCT 20/03/2023'),
-('TARIFF_SX_CD',       'San xuat - Gio Cao diem (TOU)',       'TOU',      '2023-05-04', NULL, 'QD 648/QD-BCT 20/03/2023'),
-('TARIFF_SX_TD',       'San xuat - Gio Thap diem (TOU)',      'TOU',      '2023-05-04', NULL, 'QD 648/QD-BCT 20/03/2023');
+-- Lịch Ghi Đối Tượng Quản Lý (Schedules)
+INSERT INTO lich_ghi_dqly (dtuong_qly, thang_ck, ky_chot, tu_ngay, den_ngay, tthai_lich, ma_dviqly) VALUES
+('SO_01', '2026_06', 1, '2026-06-01', '2026-06-10', 'CLOSED', 'PD0100'),
+('SO_01', '2026_06', 2, '2026-06-11', '2026-06-20', 'CLOSED', 'PD0100'),
+('SO_01', '2026_06', 3, '2026-06-21', '2026-06-30', 'ACTIVE', 'PD0100'),
+('SO_01', '2026_07', 1, '2026-07-01', '2026-07-31', 'ACTIVE', 'PD0100');
 
--- Tariff Details
-INSERT INTO tariff_detail (tariff_code, step, min_kwh, max_kwh, unit_price) VALUES
-('TARIFF_SHBT_2023', 1,   0,  50, 1806.00),
-('TARIFF_SHBT_2023', 2,  50, 100, 1866.00),
-('TARIFF_SHBT_2023', 3, 100, 200, 2167.00),
-('TARIFF_SHBT_2023', 4, 200, 300, 2729.00),
-('TARIFF_SHBT_2023', 5, 300, 400, 3050.00),
-('TARIFF_SHBT_2023', 6, 400,NULL, 3157.00),
-('TARIFF_KDOANH_2023', 1, 0, NULL, 2500.00),
-('TARIFF_SX_2023',     1, 0, NULL, 2000.00),
-('TARIFF_SX_BT', 1, 0, NULL, 1800.00),
-('TARIFF_SX_CD', 1, 0, NULL, 3200.00),
-('TARIFF_SX_TD', 1, 0, NULL, 1100.00);
+-- Khách Hàng (Tối giản)
+INSERT INTO khach_hang (ma_khang, ten_khang, dia_chi, dien_thoai, ma_so_thue, email, ma_dviqly) VALUES
+('KH001', 'Nguyen Van A (Sinh hoạt 1 hộ)', '123 Đường Láng, Hà Nội', '0912345678', '0102030405', 'a.nguyen@gmail.com', 'PD0100'),
+('KH002', 'Tran Thi B (Sản xuất đơn giá)', '456 Phố Vọng, Hà Nội', '0987654321', '0203040506', 'b.tran@gmail.com', 'PA1100'),
+('KH003', 'Công ty C (Hỗn hợp + Netting + 3 hộ)', '789 Đường Bưởi, Hà Nội', '0901234567', '0304050607', 'c.company@gmail.com', 'PD0100'),
+('KH005', 'Nhà máy E (Sản xuất TOU 3 giá)', 'KCN Thăng Long, Đông Anh', '0243123456', '0506070809', 'e.factory@gmail.com', 'PA1100'),
+('KH006', 'Hộ F (Mô phỏng quay vòng chỉ số)', '12 Ngõ Trại, Hà Nội', '0955555555', '0607080910', 'f.rollover@gmail.com', 'PD0100');
 
--- Book Billing Schedules
-INSERT INTO book_billing_schedule (book_id, billing_cycle_month, period, from_date, to_date, status) VALUES
-('SO_01', '2026_06', 1, '2026-06-01', '2026-06-10', 'CLOSED'),
-('SO_01', '2026_06', 2, '2026-06-11', '2026-06-20', 'CLOSED'),
-('SO_01', '2026_06', 3, '2026-06-21', '2026-06-30', 'ACTIVE'),
-('SO_01', '2026_07', 1, '2026-07-01', '2026-07-31', 'ACTIVE');
+-- Điểm Đo (Lồng ghép thong_tin_cto và danh_sach_ap_gia JSONB)
+INSERT INTO diem_do (ma_ddo, ma_khang, dtuong_qly, ma_capda, trang_thai, loai_ddo, loai_khang, is_dien_mt, thong_tin_cto, danh_sach_ap_gia, ma_dviqly) VALUES
+('METER-01', 'KH001', 'SO_01', 'HẠ ÁP', 'ACTIVE', 1, 1, FALSE,
+ '[{"so_seri": "SN-11111", "ma_cto": "SN-11111", "he_so_nhan": 1.0, "so_pha": 1, "danh_sach_bcs": ["KT"], "ngay_treo": "2025-01-01", "ngay_thao": null, "trang_thai": "ACTIVE"}]'::jsonb,
+ '[{"soThuTu": 1, "maNhomnn": "SHBT", "maNn": "4401", "maCapda": "1", "maNgia": "TARIFF_SHBT_2023", "tgianBdien": "BT", "dinhMuc": 100.00, "loaiDmuc": "TL", "soHo": 1}]'::jsonb, 'PD0100'),
 
--- Accounts
-INSERT INTO account (account_id, book_id, customer_name, status, norms_factor) VALUES
-('KH001', 'SO_01', 'Nguyen Van A (SHBT 1 ho)',          'ACTIVE', 1),
-('KH002', 'SO_01', 'Tran Thi B (San xuat don gia)',     'ACTIVE', 1),
-('KH003', 'SO_01', 'Cong ty C (Netting + norms=3)',     'ACTIVE', 3),
-('KH005', 'SO_01', 'Nha may E (San xuat TOU 3 gia)',    'ACTIVE', 1),
-('KH006', 'SO_01', 'Ho F (Test Register Rollover)',     'ACTIVE', 1);
+('METER-02', 'KH002', 'SO_01', 'TRUNG ÁP', 'ACTIVE', 1, 2, FALSE,
+ '[{"so_seri": "SN-22222", "ma_cto": "SN-22222", "he_so_nhan": 1.0, "so_pha": 3, "danh_sach_bcs": ["KT"], "ngay_treo": "2025-01-01", "ngay_thao": null, "trang_thai": "ACTIVE"}]'::jsonb,
+ '[{"soThuTu": 1, "maNhomnn": "SXBT", "maNn": "2201", "maCapda": "2", "maNgia": "TARIFF_SX_2023", "tgianBdien": "BT", "dinhMuc": 100.00, "loaiDmuc": "TL", "soHo": 0}]'::jsonb, 'PA1100'),
+ 
+('METER-03-TONG', 'KH003', 'SO_01', 'HẠ ÁP', 'ACTIVE', 1, 1, FALSE,
+ '[{"so_seri": "SN-33300", "ma_cto": "SN-33300", "he_so_nhan": 1.0, "so_pha": 3, "danh_sach_bcs": ["KT"], "ngay_treo": "2025-01-01", "ngay_thao": null, "trang_thai": "ACTIVE"}]'::jsonb,
+ '[{"soThuTu": 1, "maNhomnn": "SHBT", "maNn": "4401", "maCapda": "1", "maNgia": "TARIFF_SHBT_2023", "tgianBdien": "BT", "dinhMuc": 70.00, "loaiDmuc": "TL", "soHo": 3},
+   {"soThuTu": 2, "maNhomnn": "KDDV", "maNn": "3101", "maCapda": "1", "maNgia": "TARIFF_KDOANH_2023", "tgianBdien": "BT", "dinhMuc": 30.00, "loaiDmuc": "TL", "soHo": 1}]'::jsonb, 'PD0100'),
+   
+('METER-03-PHU', 'KH003', 'SO_01', 'HẠ ÁP', 'ACTIVE', 1, 1, FALSE,
+ '[{"so_seri": "SN-33301", "ma_cto": "SN-33301", "he_so_nhan": 1.0, "so_pha": 1, "danh_sach_bcs": ["KT"], "ngay_treo": "2025-01-01", "ngay_thao": null, "trang_thai": "ACTIVE"}]'::jsonb,
+ '[{"soThuTu": 1, "maNhomnn": "KDDV", "maNn": "3101", "maCapda": "1", "maNgia": "TARIFF_KDOANH_2023", "tgianBdien": "BT", "dinhMuc": 100.00, "loaiDmuc": "TL", "soHo": 1}]'::jsonb, 'PD0100'),
+ 
+('METER-05-BT', 'KH005', 'SO_01', 'TRUNG ÁP', 'ACTIVE', 2, 2, FALSE,
+ '[{"so_seri": "SN-55551", "ma_cto": "SN-55551", "he_so_nhan": 1.0, "so_pha": 3, "danh_sach_bcs": ["BT"], "ngay_treo": "2025-01-01", "ngay_thao": null, "trang_thai": "ACTIVE"}]'::jsonb,
+ '[{"soThuTu": 1, "maNhomnn": "SXBT", "maNn": "2201", "maCapda": "2", "maNgia": "TARIFF_SX_BT", "tgianBdien": "BT", "dinhMuc": 100.00, "loaiDmuc": "TL", "soHo": 0}]'::jsonb, 'PA1100'),
+ 
+('METER-05-CD', 'KH005', 'SO_01', 'TRUNG ÁP', 'ACTIVE', 3, 2, FALSE,
+ '[{"so_seri": "SN-55552", "ma_cto": "SN-55552", "he_so_nhan": 1.0, "so_pha": 3, "danh_sach_bcs": ["CD"], "ngay_treo": "2025-01-01", "ngay_thao": null, "trang_thai": "ACTIVE"}]'::jsonb,
+ '[{"soThuTu": 1, "maNhomnn": "SXBT", "maNn": "2201", "maCapda": "2", "maNgia": "TARIFF_SX_CD", "tgianBdien": "CD", "dinhMuc": 100.00, "loaiDmuc": "TL", "soHo": 0}]'::jsonb, 'PA1100'),
+ 
+('METER-05-TD', 'KH005', 'SO_01', 'TRUNG ÁP', 'ACTIVE', 3, 2, FALSE,
+ '[{"so_seri": "SN-55553", "ma_cto": "SN-55553", "he_so_nhan": 1.0, "so_pha": 3, "danh_sach_bcs": ["TD"], "ngay_treo": "2025-01-01", "ngay_thao": null, "trang_thai": "ACTIVE"}]'::jsonb,
+ '[{"soThuTu": 1, "maNhomnn": "SXBT", "maNn": "2201", "maCapda": "2", "maNgia": "TARIFF_SX_TD", "tgianBdien": "TD", "dinhMuc": 100.00, "loaiDmuc": "TL", "soHo": 0}]'::jsonb, 'PA1100'),
+ 
+('METER-06', 'KH006', 'SO_01', 'HẠ ÁP', 'ACTIVE', 1, 1, FALSE,
+ '[{"so_seri": "SN-66666", "ma_cto": "SN-66666", "he_so_nhan": 1.0, "so_pha": 1, "danh_sach_bcs": ["KT"], "ngay_treo": "2025-01-01", "ngay_thao": null, "trang_thai": "ACTIVE"}]'::jsonb,
+ '[{"soThuTu": 1, "maNhomnn": "SHBT", "maNn": "4401", "maCapda": "1", "maNgia": "TARIFF_SHBT_2023", "tgianBdien": "BT", "dinhMuc": 100.00, "loaiDmuc": "TL", "soHo": 1}]'::jsonb, 'PD0100');
 
--- Meter Points
-INSERT INTO meter_point (meter_point_id, account_id, model_code, tariff_code, status, meter_serial) VALUES
-('METER-01',      'KH001', 'MODEL_MECH_5D',   'TARIFF_SHBT_2023',   'ACTIVE', 'SN-11111'),
-('METER-02',      'KH002', 'MODEL_ELEC_5D',   'TARIFF_SX_2023',     'ACTIVE', 'SN-22222'),
-('METER-03-TONG', 'KH003', 'MODEL_SMART_AMI', 'TARIFF_SHBT_2023',   'ACTIVE', 'SN-33300'),
-('METER-03-PHU',  'KH003', 'MODEL_ELEC_5D',   'TARIFF_KDOANH_2023', 'ACTIVE', 'SN-33301'),
-('METER-05-BT',   'KH005', 'MODEL_ELEC_5D',   'TARIFF_SX_BT',       'ACTIVE', 'SN-55551'),
-('METER-05-CD',   'KH005', 'MODEL_ELEC_5D',   'TARIFF_SX_CD',       'ACTIVE', 'SN-55552'),
-('METER-05-TD',   'KH005', 'MODEL_ELEC_5D',   'TARIFF_SX_TD',       'ACTIVE', 'SN-55553'),
-('METER-06',      'KH006', 'MODEL_MECH_5D',   'TARIFF_SHBT_2023',   'ACTIVE', 'SN-66666');
-
--- Meter Relations (Netting)
-INSERT INTO meter_relation (parent_id, child_id, relation_type, effective_from) VALUES
+-- Quan Hệ Điểm Đo (Topology Netting)
+INSERT INTO quan_he_diem_do (ma_ddo_cha, ma_ddo_con, loai_quan_he, ngay_hieu_luc) VALUES
 ('METER-03-TONG', 'METER-03-PHU', 'NETTING', '2020-01-01');
 
--- Meter Usage — 2026_06 (VALIDATED, ORIGINAL records)
-INSERT INTO meter_usage (
-    usage_id, sub_reading_seq, account_id, meter_point_id, billing_cycle_month, period,
-    from_date, to_date, start_index, end_index,
-    is_rollover, max_register_snapshot, raw_consumption,
-    status, record_type, source
+-- Chỉ Số Điện Năng — Chu kỳ 2026_06 (VALIDATED)
+INSERT INTO chi_so_dien_nang (
+    id_chi_so, lan_doc_phu, ma_khang, ma_ddo, thang_chu_ky, ky_chot,
+    tu_ngay, den_ngay, chi_so_dau, chi_so_cuoi,
+    co_quay_vong, san_luong_tho,
+    trang_thai_xu_ly, loai_ghi_index, nguon_ghi, tgian_bdien
 ) VALUES
--- KH001: 250 kWh standard
+-- KH001: 250 kWh tiêu chuẩn
 (1, 1, 'KH001', 'METER-01', '2026_06', 3,
  '2026-06-01 00:00:00', '2026-06-30 23:59:59',
- 1000.00, 1250.00, FALSE, 99999.9, 250.00, 'VALIDATED', 'ORIGINAL', 'AMR'),
-
--- KH002: 10000 kWh industrial
+ 1000.00, 1250.00, FALSE, 250.00, 'VALIDATED', 'ORIGINAL', 'AMR', 'BT'),
+ 
+-- KH002: 10000 kWh sản xuất
 (2, 1, 'KH002', 'METER-02', '2026_06', 3,
  '2026-06-01 00:00:00', '2026-06-30 23:59:59',
- 5000.00, 15000.00, FALSE, 99999.9, 10000.00, 'VALIDATED', 'ORIGINAL', 'HANDHELD'),
-
--- KH003: Netting — TONG=500kWh, PHU=100kWh, Net=400kWh
+ 5000.00, 15000.00, FALSE, 10000.00, 'VALIDATED', 'ORIGINAL', 'HANDHELD', 'BT'),
+ 
+-- KH003: Netting — TONG=500kWh, PHU=100kWh -> Net = 400kWh
 (3, 1, 'KH003', 'METER-03-TONG', '2026_06', 3,
  '2026-06-01 00:00:00', '2026-06-30 23:59:59',
- 2000.00, 2500.00, FALSE, 9999999.9, 500.00, 'VALIDATED', 'ORIGINAL', 'AMR'),
+ 2000.00, 2500.00, FALSE, 500.00, 'VALIDATED', 'ORIGINAL', 'AMR', 'BT'),
 (4, 1, 'KH003', 'METER-03-PHU', '2026_06', 3,
  '2026-06-01 00:00:00', '2026-06-30 23:59:59',
- 500.00, 600.00, FALSE, 99999.9, 100.00, 'VALIDATED', 'ORIGINAL', 'HANDHELD'),
-
--- KH005: TOU 3-rate (BT=1000, CD=200, TD=500 kWh)
+ 500.00, 600.00, FALSE, 100.00, 'VALIDATED', 'ORIGINAL', 'HANDHELD', 'BT'),
+ 
+-- KH005: TOU 3 giá (BT=1000, CD=200, TD=500 kWh)
 (8, 1, 'KH005', 'METER-05-BT', '2026_06', 3,
  '2026-06-01 00:00:00', '2026-06-30 23:59:59',
- 1000.00, 2000.00, FALSE, 99999.9, 1000.00, 'VALIDATED', 'ORIGINAL', 'AMR'),
+ 1000.00, 2000.00, FALSE, 1000.00, 'VALIDATED', 'ORIGINAL', 'AMR', 'BT'),
 (9, 1, 'KH005', 'METER-05-CD', '2026_06', 3,
  '2026-06-01 00:00:00', '2026-06-30 23:59:59',
- 500.00, 700.00, FALSE, 99999.9, 200.00, 'VALIDATED', 'ORIGINAL', 'AMR'),
+ 500.00, 700.00, FALSE, 200.00, 'VALIDATED', 'ORIGINAL', 'AMR', 'CD'),
 (10, 1, 'KH005', 'METER-05-TD', '2026_06', 3,
  '2026-06-01 00:00:00', '2026-06-30 23:59:59',
- 300.00, 800.00, FALSE, 99999.9, 500.00, 'VALIDATED', 'ORIGINAL', 'AMR'),
-
--- KH006: REGISTER ROLLOVER [I.2 Edge Case]
+ 300.00, 800.00, FALSE, 500.00, 'VALIDATED', 'ORIGINAL', 'AMR', 'TD'),
+ 
+-- KH006: Quay vòng số của công tơ cơ
 (11, 1, 'KH006', 'METER-06', '2026_06', 3,
  '2026-06-01 00:00:00', '2026-06-30 23:59:59',
- 99900.00, 100.00, TRUE, 99999.9, 199.90, 'VALIDATED', 'ORIGINAL', 'HANDHELD');
+ 99900.00, 100.00, TRUE, 200.00, 'VALIDATED', 'ORIGINAL', 'HANDHELD', 'BT');
 
--- Meter Usage — 2026_07 (METER REPLACEMENT MID-PERIOD [I.2 Edge Case])
-INSERT INTO meter_usage (
-    usage_id, sub_reading_seq, account_id, meter_point_id, billing_cycle_month, period,
-    from_date, to_date, start_index, end_index,
-    is_rollover, max_register_snapshot, raw_consumption,
-    status, record_type, source
+-- Chỉ Số Điện Năng — Thay công tơ giữa chu kỳ của KH001 tháng 07
+INSERT INTO chi_so_dien_nang (
+    id_chi_so, lan_doc_phu, ma_khang, ma_ddo, thang_chu_ky, ky_chot,
+    tu_ngay, den_ngay, chi_so_dau, chi_so_cuoi,
+    co_quay_vong, san_luong_tho,
+    trang_thai_xu_ly, loai_ghi_index, nguon_ghi, tgian_bdien
 ) VALUES
--- seq=1: Old meter, 01/07 to 10/07 = 50 kWh
 (12, 1, 'KH001', 'METER-01', '2026_07', 1,
  '2026-07-01 00:00:00', '2026-07-10 23:59:59',
- 1050.00, 1100.00, FALSE, 99999.9, 50.00, 'VALIDATED', 'ORIGINAL', 'HANDHELD'),
--- seq=2: New replacement meter, 10/07 to 31/07 = 200 kWh
+ 1250.00, 1300.00, FALSE, 50.00, 'VALIDATED', 'ORIGINAL', 'HANDHELD', 'BT'),
 (13, 2, 'KH001', 'METER-01', '2026_07', 1,
  '2026-07-10 00:00:00', '2026-07-31 23:59:59',
- 0.00, 200.00, FALSE, 99999.9, 200.00, 'VALIDATED', 'ORIGINAL', 'HANDHELD');
+ 0.00, 200.00, FALSE, 200.00, 'VALIDATED', 'ORIGINAL', 'HANDHELD', 'BT');
+
+-- 11. Nhật Ký Lỗi Tính Toán (Fail-Safe Logging)
+CREATE TABLE nhat_ky_loi_tinh_toan (
+    id_nhat_ky              BIGSERIAL PRIMARY KEY,
+    ma_khang                VARCHAR(50) NOT NULL,
+    thang_chu_ky            VARCHAR(20) NOT NULL,
+    ky_chot                 INT NOT NULL,
+    loai_loi                VARCHAR(100) NOT NULL, -- SNAPSHOT_MALFORM | CALCULATION_ERROR | DB_ERROR
+    chi_tiet_loi            TEXT NOT NULL,
+    created_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_nhat_ky_loi_khang ON nhat_ky_loi_tinh_toan(ma_khang, thang_chu_ky);
+
+-- 12. Lịch Xử Lý Lại (Self-Healing Scheduler)
+CREATE TABLE lich_xu_ly_lai (
+    id_nhiem_vu            BIGSERIAL PRIMARY KEY,
+    ma_khang                VARCHAR(50) NOT NULL,
+    thang_chu_ky            VARCHAR(20) NOT NULL,
+    ky_chot                 INT NOT NULL,
+    so_lan_thu_lai          INT NOT NULL DEFAULT 0,
+    loi_cuoi_cung           TEXT,
+    thoi_gian_thu_lai_ke    TIMESTAMP NOT NULL,
+    trang_thai              VARCHAR(20) NOT NULL DEFAULT 'PENDING', -- PENDING | COMPLETED | FAILED
+    created_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_lich_xu_ly_lai_hen ON lich_xu_ly_lai(trang_thai, thoi_gian_thu_lai_ke) WHERE trang_thai = 'PENDING';
+
+-- 13. Nhật Ký Tính Toán (Lưu chi tiết các lần tính cước thành công/thất bại)
+CREATE TABLE nhat_ky_tinh_toan (
+    id_log          UUID PRIMARY KEY,
+    dtuong_qly      VARCHAR(50) NOT NULL,
+    ma_khang        VARCHAR(50) NOT NULL,
+    thang_chu_ky    VARCHAR(20) NOT NULL,
+    ky_chot         INT NOT NULL,
+    trang_thai      VARCHAR(20) NOT NULL,
+    du_lieu_vao     JSONB,
+    du_lieu_ra      JSONB,
+    thong_bao_loi   TEXT,
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_nhat_ky_tinh_toan_lookup ON nhat_ky_tinh_toan(ma_khang, thang_chu_ky, ky_chot);
+
+-- 14. Nhật Ký Chỉ Số (Lifecycle logging cho Ingestion/Validation - Partitioned)
+CREATE TABLE nhat_ky_chi_so (
+    id_log          UUID NOT NULL DEFAULT gen_random_uuid(),
+    ma_khang        VARCHAR(50),
+    ma_ddo          VARCHAR(50),
+    thang_chu_ky    VARCHAR(20) NOT NULL,
+    ky_chot         INT,
+    buoc_xu_ly      VARCHAR(30),  -- INGESTION | VALIDATION | COMPLETENESS
+    trang_thai      VARCHAR(20),  -- VALIDATED | SUSPECT | PENDING_MANUAL | TELEMETRY
+    chi_tiet        JSONB,
+    nguon_ghi       VARCHAR(20),
+    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (id_log, thang_chu_ky)
+) PARTITION BY LIST (thang_chu_ky);
+
+CREATE TABLE nhat_ky_chi_so_2026_06 PARTITION OF nhat_ky_chi_so FOR VALUES IN ('2026_06');
+CREATE TABLE nhat_ky_chi_so_2026_07 PARTITION OF nhat_ky_chi_so FOR VALUES IN ('2026_07');
+CREATE TABLE nhat_ky_chi_so_2026_08 PARTITION OF nhat_ky_chi_so FOR VALUES IN ('2026_08');
+CREATE TABLE nhat_ky_chi_so_default PARTITION OF nhat_ky_chi_so DEFAULT;
+CREATE INDEX idx_nhat_ky_chi_so_lookup ON nhat_ky_chi_so(ma_khang, thang_chu_ky);

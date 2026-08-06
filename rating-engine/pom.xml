@@ -28,6 +28,14 @@
             <scope>provided</scope>
         </dependency>
 
+        <!-- Logging SLF4J -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
+
+
+
         <!-- JUnit Jupiter for Unit Testing (Test scope only, keeping library pure Java) -->
         <dependency>
             <groupId>org.junit.jupiter</groupId>

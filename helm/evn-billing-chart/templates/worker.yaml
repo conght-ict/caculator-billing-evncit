@@ -1,0 +1,74 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-worker
+  labels:
+    app: {{ .Values.worker.name }}
+spec:
+  replicas: {{ .Values.worker.replicaCount }}
+  selector:
+    matchLabels:
+      app: {{ .Values.worker.name }}
+  template:
+    metadata:
+      labels:
+        app: {{ .Values.worker.name }}
+    spec:
+      containers:
+      - name: worker
+        image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag }}"
+        imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+        envFrom:
+        - configMapRef:
+            name: {{ .Release.Name }}-config
+        - secretRef:
+            name: {{ .Release.Name }}-secret
+        env:
+        - name: JAVA_OPTS
+          value: {{ .Values.worker.javaOpts | quote }}
+        resources:
+          requests:
+            cpu: {{ .Values.worker.resources.requests.cpu | quote }}
+            memory: {{ .Values.worker.resources.requests.memory | quote }}
+          limits:
+            cpu: {{ .Values.worker.resources.limits.cpu | quote }}
+            memory: {{ .Values.worker.resources.limits.memory | quote }}
+        ports:
+        - containerPort: 8081
+          name: http-metrics
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-worker-service
+spec:
+  type: ClusterIP
+  selector:
+    app: {{ .Values.worker.name }}
+  ports:
+  - port: 8081
+    targetPort: 8081
+    name: metrics
+{{- if .Values.worker.keda.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ .Release.Name }}-worker-scaler
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Release.Name }}-worker
+  minReplicaCount: {{ .Values.worker.keda.minReplicas }}
+  maxReplicaCount: {{ .Values.worker.keda.maxReplicas }}
+  cooldownPeriod: 30
+  pollingInterval: 15
+  triggers:
+  - type: kafka
+    metadata:
+      bootstrapServers: {{ .Values.config.kafkaServers | quote }}
+      consumerGroup: billing-worker-group
+      topic: billing-execution-topic
+      lagThreshold: {{ .Values.worker.keda.lagThreshold | quote }}
+{{- end }}

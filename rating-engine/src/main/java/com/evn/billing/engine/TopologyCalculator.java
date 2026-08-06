@@ -17,7 +17,7 @@ public class TopologyCalculator {
      * @return The calculated Net Consumption (never negative)
      */
     public BigDecimal calculateNetConsumption(MeterPointNode node, Map<String, BigDecimal> consumptions) {
-        BigDecimal nodeRaw = consumptions.getOrDefault(node.getMeterPointId(), BigDecimal.ZERO);
+        BigDecimal nodeRaw = consumptions.getOrDefault(node.getMaDdo(), BigDecimal.ZERO);
         BigDecimal netValue = nodeRaw;
 
         if (node.getChildPoints() != null) {
