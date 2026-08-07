@@ -1,10 +1,15 @@
 package com.evn.billing.mediation.listener;
 
+import com.evn.billing.common.dto.GenerateSnapshotRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobExecutionListener;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.web.client.RestTemplate;
 import com.evn.billing.mediation.repository.BillingRunRepository;
 
@@ -16,10 +21,9 @@ public class BillingJobListener implements JobExecutionListener {
     @Autowired
     private BillingRunRepository billingRunRepository;
 
-    /**
-     * Triggers configuration freezing snapshot building and cache synchronization
-     * on the snapshot-generator module prior to starting batch reading.
-     */
+    @Value("${billing.snapshot.url:http://localhost:8082/snapshot}")
+    private String snapshotServiceUrl;
+
     @Override
     public void beforeJob(JobExecution jobExecution) {
         String dtuongQly = jobExecution.getJobParameters().getString("dtuongQly");
@@ -29,14 +33,19 @@ public class BillingJobListener implements JobExecutionListener {
 
         log.info("BeforeJob Hook: Triggering snapshot building for Book: {}, Cycle: {}, Period: {}", dtuongQly, month, period);
         
-        // Rest API call to snapshot-generator microservice
-        String snapshotHost = System.getenv("SNAPSHOT_SERVICE_HOST") != null ? System.getenv("SNAPSHOT_SERVICE_HOST") : "localhost";
-        String url = "http://" + snapshotHost + ":8082/api/v1/snapshots/generate?dtuongQly=" + dtuongQly + "&month=" + month + "&period=" + period;
+        // Fix: Gửi RequestBody JSON thay vì query params, dùng property thay vì System.getenv
+        String url = snapshotServiceUrl + "/api/v1/snapshots/generate";
+        GenerateSnapshotRequest snapshotRequest = new GenerateSnapshotRequest(dtuongQly, month, period);
         try {
-            restTemplate.postForEntity(url, null, String.class);
+            log.info("BeforeJob Hook: Calling snapshot-generator at URL: {}", url);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<GenerateSnapshotRequest> entity = new HttpEntity<>(snapshotRequest, headers);
+            restTemplate.postForEntity(url, entity, String.class);
             log.info("BeforeJob Hook: Snapshot profile freeze and Redis warmup completed successfully.");
         } catch (Exception e) {
-            log.error("BeforeJob Hook Warning: Snapshot service trigger failed: {}", e.getMessage());
+            // Fix: Log chi tiết hơn nhưng KHÔNG abort job — worker sẽ tự auto-generate nếu thiếu snapshot
+            log.error("BeforeJob Hook Warning: Snapshot service trigger failed at URL: {}. Error: {}. Worker will attempt on-demand generation.", url, e.getMessage());
         }
 
         // Count total accounts in this Book
@@ -82,7 +91,9 @@ public class BillingJobListener implements JobExecutionListener {
         log.info("AfterJob Hook: Dispatching batch job execution complete. Status: {}", finalStatus);
 
         try {
-            String scheduleRunStatus = "COMPLETED";
+            // Fix: Dùng DISPATCHED thay vì COMPLETED
+            // COMPLETED chỉ được đặt bởi billing-worker khi TẤT CẢ khách hàng đã xử lý xong
+            String scheduleRunStatus = "DISPATCHED";
             if ("FAILED".equals(finalStatus) || "STOPPED".equals(finalStatus)) {
                 scheduleRunStatus = "FAILED";
             }

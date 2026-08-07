@@ -37,18 +37,18 @@ public class OnDemandBillingController {
      */
     @PostMapping("/calculate-immediate")
     public ResponseEntity<?> calculateImmediate(@RequestBody CalculateImmediateRequest request) {
-        String accountId = request.getMaKhang();
+        String maKhang = request.getMaKhang();
         String month = request.getThangChuKy();
 
-        log.info("[ON-DEMAND-SYNC] Received synchronous immediate calculation request for Account: {}, Month: {}", accountId, month);
+        log.info("[ON-DEMAND-SYNC] Received synchronous immediate calculation request for Account: {}, Month: {}", maKhang, month);
         try {
             billingService.calculateImmediate(
-                    accountId, month, request.getKyChot(), request.getPhienBan(),
+                    maKhang, month, request.getKyChot(), request.getPhienBan(),
                     request.getDtuongQly(), request.getTriggeredBy());
-            log.info("[ON-DEMAND-SYNC] Synchronous immediate calculation succeeded for Account: {}", accountId);
+            log.info("[ON-DEMAND-SYNC] Synchronous immediate calculation succeeded for Account: {}", maKhang);
             return ResponseEntity.ok("Invoice calculated successfully on demand.");
         } catch (Exception e) {
-            log.error("[ON-DEMAND-SYNC] Synchronous immediate calculation failed for Account: {}, Error: {}", accountId, e.getMessage(), e);
+            log.error("[ON-DEMAND-SYNC] Synchronous immediate calculation failed for Account: {}, Error: {}", maKhang, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("On-demand calculation failed: " + e.getMessage());
         }
@@ -60,17 +60,17 @@ public class OnDemandBillingController {
      */
     @PostMapping("/cancel")
     public ResponseEntity<?> cancelBilling(@RequestBody CancelBillingRequest request) {
-        String accountId = request.getMaKhang();
+        String maKhang = request.getMaKhang();
         String month = request.getThangChuKy();
         Integer period = request.getKyChot() != null ? request.getKyChot() : 1;
 
-        log.info("[CANCEL-BILL-API] Received request to cancel billing for Account: {}, Month: {}, Period: {}", accountId, month, period);
+        log.info("[CANCEL-BILL-API] Received request to cancel billing for Account: {}, Month: {}, Period: {}", maKhang, month, period);
         try {
-            billingService.cancelBilling(accountId, month, period);
-            log.info("[CANCEL-BILL-API] Successfully cancelled billing and evicted cache for Account: {}", accountId);
+            billingService.cancelBilling(maKhang, month, period);
+            log.info("[CANCEL-BILL-API] Successfully cancelled billing and evicted cache for Account: {}", maKhang);
             return ResponseEntity.ok("Billing calculation cancelled successfully. Status set to CANCELLED.");
         } catch (Exception e) {
-            log.error("[CANCEL-BILL-API] Failed to cancel billing for Account: {}, Error: {}", accountId, e.getMessage(), e);
+            log.error("[CANCEL-BILL-API] Failed to cancel billing for Account: {}, Error: {}", maKhang, e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("Failed to cancel billing: " + e.getMessage());
         }
@@ -81,15 +81,15 @@ public class OnDemandBillingController {
      */
     @PostMapping("/lock")
     public ResponseEntity<?> lockBilling(@RequestBody LockBillingRequest request) {
-        String accountId = request.getMaKhang();
+        String maKhang = request.getMaKhang();
         String month = request.getThangChuKy();
         Integer period = request.getKyChot() != null ? request.getKyChot() : 1;
         String status = request.getTrangThai() != null ? request.getTrangThai() : "LOCKED";
 
         log.info("[LOCK-BILL-API] Received request to lock billing status for Account: {}, Month: {}, Period: {}, Target Status: {}", 
-                accountId, month, period, status);
+                maKhang, month, period, status);
         try {
-            billingService.lockBilling(accountId, month, period, status);
+            billingService.lockBilling(maKhang, month, period, status);
             return ResponseEntity.ok("Billing status successfully updated to " + status + ".");
         } catch (Exception e) {
             log.error("[LOCK-BILL-API] Failed to lock billing status: {}", e.getMessage(), e);

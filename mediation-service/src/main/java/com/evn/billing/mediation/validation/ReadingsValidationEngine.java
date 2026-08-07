@@ -5,6 +5,6 @@ import com.evn.billing.common.domain.MeterUsage;
 import java.util.List;
 
 public interface ReadingsValidationEngine {
-    ValidationResult validate(String accountId, String month, int period);
-    ValidationResult validate(String accountId, String month, int period, BillingConfigSnapshot config, List<MeterUsage> usages);
+    ValidationResult validate(String maKhang, String month, int period);
+    ValidationResult validate(String maKhang, String month, int period, BillingConfigSnapshot config, List<MeterUsage> usages);
 }

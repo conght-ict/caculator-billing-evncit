@@ -25,23 +25,23 @@ public class ReadingsValidationEngineImpl implements ReadingsValidationEngine {
     private com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Override
-    public ValidationResult validate(String accountId, String month, int period) {
-        BillingConfigSnapshot config = getSnapshotConfig(accountId, month, period);
-        List<MeterUsage> usages = meterUsageRepository.findByMaKhangAndThangChuKyAndKyChotAndTrangThaiXuLy(accountId, month, period, "VALIDATED");
-        return validate(accountId, month, period, config, usages);
+    public ValidationResult validate(String maKhang, String month, int period) {
+        BillingConfigSnapshot config = getSnapshotConfig(maKhang, month, period);
+        List<MeterUsage> usages = meterUsageRepository.findByMaKhangAndThangChuKyAndKyChotAndTrangThaiXuLy(maKhang, month, period, "VALIDATED");
+        return validate(maKhang, month, period, config, usages);
     }
 
     @Override
-    public ValidationResult validate(String accountId, String month, int period, BillingConfigSnapshot config, List<MeterUsage> usages) {
+    public ValidationResult validate(String maKhang, String month, int period, BillingConfigSnapshot config, List<MeterUsage> usages) {
         ValidationResult result = new ValidationResult();
         for (ValidationRule rule : rules) {
-            rule.check(accountId, month, period, config, usages, result);
+            rule.check(maKhang, month, period, config, usages, result);
         }
         return result;
     }
 
-    private BillingConfigSnapshot getSnapshotConfig(String accountId, String month, int period) {
-        String cacheKey = "snapshot:" + accountId + ":" + month + ":" + period;
+    private BillingConfigSnapshot getSnapshotConfig(String maKhang, String month, int period) {
+        String cacheKey = "snapshot:" + maKhang + ":" + month + ":" + period;
         try {
             String cachedJson = redisTemplate.opsForValue().get(cacheKey);
             if (cachedJson != null) {
@@ -51,7 +51,7 @@ public class ReadingsValidationEngineImpl implements ReadingsValidationEngine {
             // Ignore
         }
 
-        var snapshotOpt = snapshotRepository.findByMaKhangAndThangChuKyAndKyChotAndPhienBanTinh(accountId, month, period, 1);
+        var snapshotOpt = snapshotRepository.findByMaKhangAndThangChuKyAndKyChotAndPhienBanTinh(maKhang, month, period, 1);
         if (snapshotOpt.isPresent()) {
             BillingConfigSnapshot config = snapshotOpt.get().getDuLieuCauHinh();
             try {

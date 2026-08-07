@@ -23,11 +23,11 @@ public class AbnormalConsumptionRule implements ValidationRule {
     private final SmartAnomalyDetector detector = new SmartAnomalyDetector();
 
     @Override
-    public void check(String accountId, String month, int period, ValidationResult result) {
-        BigDecimal currentSum = validationQueryRepository.getCurrentConsumptionSum(accountId, month, period);
+    public void check(String maKhang, String month, int period, ValidationResult result) {
+        BigDecimal currentSum = validationQueryRepository.getCurrentConsumptionSum(maKhang, month, period);
 
         // 2. Get history of previous periods (up to 12)
-        List<BigDecimal> history = repository.getHistoricalConsumptions(accountId, month, period);
+        List<BigDecimal> history = repository.getHistoricalConsumptions(maKhang, month, period);
 
         // 3. Detect anomaly
         AnomalyResult anomalyResult = detector.detect(currentSum, history);
@@ -35,22 +35,22 @@ public class AbnormalConsumptionRule implements ValidationRule {
         if (anomalyResult.isAnomaly()) {
             result.addError(String.format(
                     "ERR_ABNORMAL_SPIKE: Smart Anomaly detected for Account %s. Z-Score: %s, Current: %s, EMA: %s, StdDev: %s.",
-                    accountId, anomalyResult.getZScore(), currentSum, anomalyResult.getEma(), anomalyResult.getStdDev()
+                    maKhang, anomalyResult.getZScore(), currentSum, anomalyResult.getEma(), anomalyResult.getStdDev()
             ));
         }
     }
 
     @Override
-    public void check(String accountId, String month, int period, com.evn.billing.common.dto.BillingConfigSnapshot config, List<com.evn.billing.common.domain.MeterUsage> usages, ValidationResult result) {
+    public void check(String maKhang, String month, int period, com.evn.billing.common.dto.BillingConfigSnapshot config, List<com.evn.billing.common.domain.MeterUsage> usages, ValidationResult result) {
         if (config == null) {
-            check(accountId, month, period, result);
+            check(maKhang, month, period, result);
             return;
         }
 
         BigDecimal currentSum = BigDecimal.ZERO;
         if (usages != null) {
             for (com.evn.billing.common.domain.MeterUsage u : usages) {
-                if (accountId.equals(u.getMaKhang()) && month.equals(u.getThangChuKy()) && period == u.getKyChot()
+                if (maKhang.equals(u.getMaKhang()) && month.equals(u.getThangChuKy()) && period == u.getKyChot()
                         && ("VALIDATED".equals(u.getTrangThaiXuLy()) || "PENDING_MANUAL".equals(u.getTrangThaiXuLy()))) {
                     if (u.getConsumption() != null) {
                         currentSum = currentSum.add(u.getConsumption());
@@ -59,14 +59,14 @@ public class AbnormalConsumptionRule implements ValidationRule {
             }
         }
 
-        List<BigDecimal> history = repository.getHistoricalConsumptions(accountId, month, period);
+        List<BigDecimal> history = repository.getHistoricalConsumptions(maKhang, month, period);
 
         AnomalyResult anomalyResult = detector.detect(currentSum, history);
 
         if (anomalyResult.isAnomaly()) {
             result.addError(String.format(
                     "ERR_ABNORMAL_SPIKE: Smart Anomaly detected for Account %s. Z-Score: %s, Current: %s, EMA: %s, StdDev: %s.",
-                    accountId, anomalyResult.getZScore(), currentSum, anomalyResult.getEma(), anomalyResult.getStdDev()
+                    maKhang, anomalyResult.getZScore(), currentSum, anomalyResult.getEma(), anomalyResult.getStdDev()
             ));
         }
     }

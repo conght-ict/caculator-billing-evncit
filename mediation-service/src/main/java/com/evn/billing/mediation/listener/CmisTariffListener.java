@@ -53,10 +53,66 @@ public class CmisTariffListener {
                 String quyetDinhPhapLy = (String) duLieu.get("quyet_dinh_phap_ly");
                 String trangThai = (String) duLieu.getOrDefault("trang_thai", "ACTIVE");
                 List<Map<String, Object>> chiTietGia = (List<Map<String, Object>>) duLieu.get("chi_tiet_gia");
+                List<Map<String, Object>> chiTietGiaViet = new java.util.ArrayList<>();
+                if (chiTietGia != null) {
+                    for (Map<String, Object> block : chiTietGia) {
+                        Map<String, Object> blockViet = new java.util.LinkedHashMap<>();
+                        blockViet.put("soThuTu", block.get("step"));
+                        blockViet.put("minKwh", block.get("minKwh"));
+                        blockViet.put("maxKwh", block.get("maxKwh"));
+                        blockViet.put("donGia", block.get("unitPrice"));
+                        blockViet.put("tgianBdien", block.get("touPeriod"));
+                        chiTietGiaViet.add(blockViet);
+                    }
+                }
+                String chiTietGiaJson = objectMapper.writeValueAsString(chiTietGiaViet);
 
-                String chiTietGiaJson = objectMapper.writeValueAsString(chiTietGia);
+                // Parse metadata from maBieuGia
+                String maNhomnn = "UNKNOWN";
+                String khoangDa = "2";
+                String maNgiaCmis = "A";
+                String thoigianBdien = "KT";
+                boolean bacThang = false;
+                java.math.BigDecimal donGiaPhang = null;
 
-                cmisSyncRepository.upsertTariff(maBieuGia, tenBieuGia, loaiBieuGia, ngayHieuLuc, ngayHetHan, quyetDinhPhapLy, trangThai, chiTietGiaJson);
+                if (maBieuGia != null && maBieuGia.startsWith("TARIFF_")) {
+                    String[] parts = maBieuGia.split("_");
+                    if (parts.length > 1) {
+                        maNhomnn = parts[1];
+                    }
+                    for (String p : parts) {
+                        if (p.startsWith("CAPDA")) {
+                            khoangDa = p.substring(5);
+                        }
+                    }
+                    
+                    if (parts.length > 4 && !"CAPDA2".startsWith(parts[2]) && !"CAPDA4".startsWith(parts[2]) && !"CAPDA8".startsWith(parts[2]) && !"CAPDA7".startsWith(parts[2])) {
+                        maNgiaCmis = parts[2];
+                    }
+                    
+                    if (maBieuGia.contains("_TT_") || "TT".equals(maNgiaCmis)) {
+                        thoigianBdien = "TT";
+                    } else if ("STEPPING".equalsIgnoreCase(loaiBieuGia)) {
+                        thoigianBdien = "KT";
+                        bacThang = true;
+                    } else {
+                        thoigianBdien = "BT";
+                    }
+
+                    if ("FLAT".equalsIgnoreCase(loaiBieuGia) && chiTietGiaJson != null) {
+                        try {
+                            java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"donGia\"\\s*:\\s*([\\d\\.]+)").matcher(chiTietGiaJson);
+                            if (m.find()) {
+                                donGiaPhang = new java.math.BigDecimal(m.group(1));
+                            }
+                        } catch (Exception e) {
+                            // Ignore
+                        }
+                    }
+                }
+
+                cmisSyncRepository.upsertTariff(maBieuGia, tenBieuGia, loaiBieuGia, ngayHieuLuc, ngayHetHan, quyetDinhPhapLy, trangThai, chiTietGiaJson,
+                                                maNhomnn, khoangDa, maNgiaCmis, thoigianBdien, bacThang, donGiaPhang);
                 log.info("[CMIS-SYNC] Synchronized bieu_gia: {}", maBieuGia);
 
                 // Batch trigger snapshot refresh for affected accounts
@@ -112,7 +168,7 @@ public class CmisTariffListener {
                     continue;
                 }
 
-                String snapshotGenUrl = "http://localhost:8082/api/v1/snapshots/generate-for-account?accountId=" + maKhang 
+                String snapshotGenUrl = "http://localhost:8082/api/v1/snapshots/generate-for-account?maKhang=" + maKhang 
                         + "&month=" + month + "&period=" + period + "&ruleId=R-06&bangNguon=bieu_gia&truongThayDoi=chi_tiet_gia";
                 
                 try {

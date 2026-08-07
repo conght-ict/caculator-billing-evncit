@@ -16,31 +16,31 @@ public class ValidationQueryRepositoryImpl implements ValidationQueryRepository 
     private JdbcTemplate jdbcTemplate;
 
     @Override
-    public List<Map<String, Object>> findActiveMeterPointsByAccount(String accountId) {
+    public List<Map<String, Object>> findActiveMeterPointsByAccount(String maKhang) {
         return jdbcTemplate.queryForList(
                 "SELECT ma_ddo, loai_ddo, CAST(thong_tin_cto AS TEXT) AS thong_tin_cto FROM diem_do WHERE ma_khang = ? AND trang_thai = 'ACTIVE'",
-                accountId);
+                maKhang);
     }
 
     @Override
-    public Date findDenNgayByDdoSchedule(String accountId, String month, int period) {
+    public Date findDenNgayByDdoSchedule(String maKhang, String month, int period) {
         return jdbcTemplate.queryForObject(
                 "SELECT den_ngay FROM lich_ghi_ddo WHERE ma_ddo = (SELECT ma_ddo FROM diem_do WHERE ma_khang = ? LIMIT 1) AND thang_ck = ? AND ky_chot = ?",
-                Date.class, accountId, month, period);
+                Date.class, maKhang, month, period);
     }
 
     @Override
-    public Date findDenNgayByDqlySchedule(String accountId, String month, int period) {
+    public Date findDenNgayByDqlySchedule(String maKhang, String month, int period) {
         return jdbcTemplate.queryForObject(
                 "SELECT den_ngay FROM lich_ghi_dqly WHERE dtuong_qly = (SELECT dtuong_qly FROM diem_do WHERE ma_khang = ? LIMIT 1) AND thang_ck = ? AND ky_chot = ?",
-                Date.class, accountId, month, period);
+                Date.class, maKhang, month, period);
     }
 
     @Override
-    public List<Map<String, Object>> findValidatedReadings(String accountId, String month, int period) {
+    public List<Map<String, Object>> findValidatedReadings(String maKhang, String month, int period) {
         return jdbcTemplate.queryForList(
                 "SELECT ma_ddo, tgian_bdien, ma_cto FROM chi_so_dien_nang WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ? AND trang_thai_xu_ly = 'VALIDATED'",
-                accountId, month, period);
+                maKhang, month, period);
     }
 
     @Override
@@ -51,24 +51,24 @@ public class ValidationQueryRepositoryImpl implements ValidationQueryRepository 
     }
 
     @Override
-    public List<Map<String, Object>> findNonReplacedReadings(String accountId, String month, int period) {
+    public List<Map<String, Object>> findNonReplacedReadings(String maKhang, String month, int period) {
         return jdbcTemplate.queryForList(
                 "SELECT ma_ddo, tgian_bdien, chi_so_dau, chi_so_cuoi, san_luong_tho, ma_cto, den_ngay FROM chi_so_dien_nang WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ? AND trang_thai_xu_ly != 'REPLACED'",
-                accountId, month, period);
+                maKhang, month, period);
     }
 
     @Override
-    public BigDecimal getCurrentConsumptionSum(String accountId, String month, int period) {
+    public BigDecimal getCurrentConsumptionSum(String maKhang, String month, int period) {
         BigDecimal sum = jdbcTemplate.queryForObject(
                 "SELECT SUM(san_luong_tho) FROM chi_so_dien_nang WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ? AND trang_thai_xu_ly IN ('VALIDATED', 'PENDING_MANUAL')",
-                BigDecimal.class, accountId, month, period);
+                BigDecimal.class, maKhang, month, period);
         return sum != null ? sum : BigDecimal.ZERO;
     }
 
     @Override
-    public String findMaDviqlyByAccount(String accountId) {
+    public String findMaDviqlyByAccount(String maKhang) {
         try {
-            return jdbcTemplate.queryForObject("SELECT ma_dviqly FROM khach_hang WHERE ma_khang = ?", String.class, accountId);
+            return jdbcTemplate.queryForObject("SELECT ma_dviqly FROM khach_hang WHERE ma_khang = ?", String.class, maKhang);
         } catch (Exception e) {
             return null;
         }

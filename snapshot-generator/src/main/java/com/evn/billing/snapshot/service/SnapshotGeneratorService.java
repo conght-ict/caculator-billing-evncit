@@ -124,7 +124,7 @@ public class SnapshotGeneratorService {
             config.setDenNgay(periodToDate);
 
             // 1. Query meter points for the account
-            List<MeterPoint> meterPoints = meterPointRepository.findByMaKhangAndStatus(account.getMaKhang(), "ACTIVE");
+            List<MeterPoint> meterPoints = meterPointRepository.findByMaKhangAndTrangThai(account.getMaKhang(), "ACTIVE");
             if (meterPoints.isEmpty()) {
                 continue;
             }
@@ -152,9 +152,10 @@ public class SnapshotGeneratorService {
                         rule.setLoaiDmuc(tc.getLoaiDmuc());
                         rule.setLoaiBcs(tc.getTgianBdien());
                         rule.setTgianBdien(tc.getTgianBdien());
-                        rule.setMaNgia(tc.getMaNgia());
+                        rule.setMaNgia(resolveTariffCode(tc.getMaNgia(), tc.getMaNhomnn(), tc.getMaCapda()));
                         rule.setSoHo(tc.getSoHo());
                         rule.setMaCapda(tc.getMaCapda());
+                        rule.setMaNhomnn(tc.getMaNhomnn());
 
                         priceRulesByMeter.computeIfAbsent(mp.getMaDdo(), k -> new ArrayList<>()).add(rule);
                         if (tc.getSoHo() > maxHouseholds) {
@@ -238,7 +239,7 @@ public class SnapshotGeneratorService {
             if (mainTariff == null) {
                 throw new IllegalStateException("Missing tariff configuration details for code: " + mainTariffCode);
             }
-            boolean isStepping = "STEPPING".equals(mainTariff.getLoaiBieuGia());
+            boolean isStepping = mainTariff.isBacThang();
 
             // 4.2 Populate default billing schema steps
             config.setSchemaSteps(buildDefaultSchemaSteps(isStepping));
@@ -401,6 +402,8 @@ public class SnapshotGeneratorService {
             TariffRules rules = new TariffRules();
             rules.setMaNgia(t.getMaNgia());
             rules.setLoaiBieuGia(t.getLoaiBieuGia());
+            rules.setBacThang(t.isBacThang());
+            rules.setDonGiaPhang(t.getDonGiaPhang());
             rules.setNgayHieuLuc(t.getNgayHieuLuc());
             rules.setNgayHetHan(t.getNgayHetHan());
             rules.setBlocks(t.getBlocks() != null ? t.getBlocks() : new ArrayList<>());
@@ -456,23 +459,23 @@ public class SnapshotGeneratorService {
     }
 
     @Transactional
-    public void generateSnapshotForAccount(String accountId, String month, Integer period) {
-        generateSnapshotForAccount(accountId, month, period, "R-01", "diem_do", "danh_sach_ap_gia");
+    public void generateSnapshotForAccount(String maKhang, String month, Integer period) {
+        generateSnapshotForAccount(maKhang, month, period, "R-01", "diem_do", "danh_sach_ap_gia");
     }
 
     @Transactional
-    public void generateSnapshotForAccount(String accountId, String month, Integer period, String ruleId, String bangNguon, String truongThayDoi) {
-        if (checkLockedAndLogPending(accountId, month, period, ruleId, bangNguon, truongThayDoi)) {
+    public void generateSnapshotForAccount(String maKhang, String month, Integer period, String ruleId, String bangNguon, String truongThayDoi) {
+        if (checkLockedAndLogPending(maKhang, month, period, ruleId, bangNguon, truongThayDoi)) {
             return;
         }
 
-        Account account = accountRepository.findById(accountId).orElse(null);
+        Account account = accountRepository.findById(maKhang).orElse(null);
         if (account == null) {
-            log.warn("Account not found for snapshot generation: {}", accountId);
+            log.warn("Account not found for snapshot generation: {}", maKhang);
             return;
         }
 
-        List<MeterPoint> meterPoints = meterPointRepository.findByMaKhangAndStatus(account.getMaKhang(), "ACTIVE");
+        List<MeterPoint> meterPoints = meterPointRepository.findByMaKhangAndTrangThai(account.getMaKhang(), "ACTIVE");
         if (meterPoints.isEmpty()) {
             return;
         }
@@ -492,7 +495,7 @@ public class SnapshotGeneratorService {
                 }
             }
         } catch (Exception e) {
-            log.warn("No book schedule found for account: {}, month: {}, period: {}. Using default month bounds: {}", accountId, month, period, e.getMessage());
+            log.warn("No book schedule found for account: {}, month: {}, period: {}. Using default month bounds: {}", maKhang, month, period, e.getMessage());
             try {
                 String[] parts = month.split("_");
                 int year = Integer.parseInt(parts[0]);
@@ -545,9 +548,10 @@ public class SnapshotGeneratorService {
                     rule.setLoaiDmuc(tc.getLoaiDmuc());
                     rule.setLoaiBcs(tc.getTgianBdien());
                     rule.setTgianBdien(tc.getTgianBdien());
-                    rule.setMaNgia(tc.getMaNgia());
+                    rule.setMaNgia(resolveTariffCode(tc.getMaNgia(), tc.getMaNhomnn(), tc.getMaCapda()));
                     rule.setSoHo(tc.getSoHo());
                     rule.setMaCapda(tc.getMaCapda());
+                    rule.setMaNhomnn(tc.getMaNhomnn());
 
                     priceRulesByMeter.computeIfAbsent(mp.getMaDdo(), k -> new ArrayList<>()).add(rule);
                     if (tc.getSoHo() > maxHouseholds) {
@@ -618,13 +622,13 @@ public class SnapshotGeneratorService {
             }
         }
         if (mainTariffCode == null) {
-            throw new IllegalStateException("No main tariff code found for account: " + accountId);
+            throw new IllegalStateException("No main tariff code found for account: " + maKhang);
         }
         TariffRules mainTariff = tariffs.get(mainTariffCode);
         if (mainTariff == null) {
             throw new IllegalStateException("Missing tariff configuration details for code: " + mainTariffCode);
         }
-        boolean isStepping = "STEPPING".equals(mainTariff.getLoaiBieuGia());
+        boolean isStepping = mainTariff.isBacThang();
 
         config.setSchemaSteps(buildDefaultSchemaSteps(isStepping));
         config.setMaDviqly(account.getMaDviqly());
@@ -658,22 +662,22 @@ public class SnapshotGeneratorService {
             public void afterCommit() {
                 try {
                     redisTemplate.opsForValue().set(cacheKey, config, 24, TimeUnit.HOURS);
-                    log.info("Successfully regenerated and cached snapshot for account: {}", accountId);
+                    log.info("Successfully regenerated and cached snapshot for account: {}", maKhang);
                 } catch (Exception e) {
-                    log.warn("Failed to cache snapshot in Redis for account: {}", accountId, e);
+                    log.warn("Failed to cache snapshot in Redis for account: {}", maKhang, e);
                 }
             }
         });
     }
 
-    private boolean checkLockedAndLogPending(String accountId, String month, Integer period, String ruleId, String bangNguon, String truongThayDoi) {
+    private boolean checkLockedAndLogPending(String maKhang, String month, Integer period, String ruleId, String bangNguon, String truongThayDoi) {
         try {
-            Optional<BillingAccountSnapshot> snapOpt = snapshotRepository.findByMaKhangAndThangChuKyAndKyChot(accountId, month, period);
+            Optional<BillingAccountSnapshot> snapOpt = snapshotRepository.findByMaKhangAndThangChuKyAndKyChot(maKhang, month, period);
             if (snapOpt.isPresent() && "LOCKED".equalsIgnoreCase(snapOpt.get().getTrangThai())) {
-                log.info("[SNAP-LOCKED] Snapshot for account: {}, month: {}, period: {} is LOCKED. Logging pending change.", accountId, month, period);
+                log.info("[SNAP-LOCKED] Snapshot for account: {}, month: {}, period: {} is LOCKED. Logging pending change.", maKhang, month, period);
                 
                 PendingSnapshotChange pending = new PendingSnapshotChange();
-                pending.setMaKhang(accountId);
+                pending.setMaKhang(maKhang);
                 pending.setThangChuKy(month);
                 pending.setKyChot(period);
                 pending.setRuleId(ruleId);
@@ -726,5 +730,20 @@ public class SnapshotGeneratorService {
             return "METER_CHANGE";
         }
         return oldConfig.getChangeFlags() != null ? oldConfig.getChangeFlags() : "NONE";
+    }
+
+    private String resolveTariffCode(String maNgia, String maNhomnn, String maCapda) {
+        if (maNgia == null || maNgia.isEmpty() || maNhomnn == null || maNhomnn.isEmpty()) {
+            return defaultTariffCode;
+        }
+        if ("A".equals(maNgia) || "D".equals(maNgia) || maNgia.length() <= 2) {
+            String resolvedCapda = "1".equals(maCapda) ? "2" : maCapda;
+            if ("A".equals(maNgia)) {
+                return "TARIFF_" + maNhomnn + "_CAPDA" + resolvedCapda + "_20250510";
+            } else {
+                return "TARIFF_" + maNhomnn + "_" + maNgia + "_CAPDA" + resolvedCapda + "_20250510";
+            }
+        }
+        return maNgia;
     }
 }

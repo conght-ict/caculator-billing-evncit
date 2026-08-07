@@ -8,6 +8,8 @@ import java.util.List;
 public class TariffRules {
     private String maNgia;
     private String loaiBieuGia; // STEPPING, FLAT, TOU
+    private boolean bacThang;
+    private java.math.BigDecimal donGiaPhang;
     private LocalDate ngayHieuLuc;
     private LocalDate ngayHetHan;
     private List<TariffBlock> blocks;

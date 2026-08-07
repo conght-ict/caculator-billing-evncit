@@ -4,8 +4,8 @@ import java.util.Map;
 import java.util.Optional;
 
 public interface ReadingResolutionRepository {
-    String findBookByAccountId(String accountId);
+    String findBookByAccountId(String maKhang);
     Optional<Map<String, Object>> findLatestActiveScheduleByBook(String dtuongQly);
-    Long findSuspectOrPendingUsageId(String accountId, String month, int period);
-    Long findAnyUsageId(String accountId, String month, int period);
+    Long findSuspectOrPendingUsageId(String maKhang, String month, int period);
+    Long findAnyUsageId(String maKhang, String month, int period);
 }

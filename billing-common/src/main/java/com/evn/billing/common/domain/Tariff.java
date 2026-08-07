@@ -15,14 +15,32 @@ import java.util.List;
 public class Tariff {
 
     @Id
-    @Column(name = "ma_bieu_gia", length = 50)
+    @Column(name = "ma_bieu_gia", length = 100)
     private String maNgia;
 
-    @Column(name = "ten_bieu_gia", length = 200, nullable = false)
+    @Column(name = "ten_bieu_gia", length = 500)
     private String tenBieuGia;
 
     @Column(name = "loai_bieu_gia", length = 20, nullable = false)
     private String loaiBieuGia; // STEPPING, FLAT, TOU
+
+    @Column(name = "ma_nhomnn", length = 20, nullable = false)
+    private String maNhomnn;
+
+    @Column(name = "khoang_da", length = 5)
+    private String khoangDa;
+
+    @Column(name = "ma_ngia_cmis", length = 10)
+    private String maNgiaCmis;
+
+    @Column(name = "thoigian_bdien", length = 5)
+    private String thoigianBdien;
+
+    @Column(name = "bac_thang", nullable = false)
+    private boolean bacThang;
+
+    @Column(name = "don_gia_phang")
+    private java.math.BigDecimal donGiaPhang;
 
     @Column(name = "ngay_hieu_luc", nullable = false)
     private LocalDate ngayHieuLuc;
@@ -37,7 +55,7 @@ public class Tariff {
     private String trangThai = "ACTIVE"; // ACTIVE, INACTIVE
 
     @JdbcTypeCode(SqlTypes.JSON)
-    @Column(name = "chi_tiet_gia", nullable = false)
+    @Column(name = "chi_tiet_gia")
     private List<TariffBlock> blocks;
 
     @Column(name = "created_at", nullable = false, updatable = false)

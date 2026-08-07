@@ -76,7 +76,7 @@ public class CmisScheduleListener {
                 // Route to billing-worker via operations topic
                 Map<String, Object> cancelEvent = new HashMap<>();
                 cancelEvent.put("operationType", "CANCEL_BILLING");
-                cancelEvent.put("accountId", maKhang);
+                cancelEvent.put("maKhang", maKhang);
                 cancelEvent.put("billingCycleMonth", month);
                 cancelEvent.put("period", period);
 

@@ -45,7 +45,16 @@ public class MonitoringService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     public List<Account> getTopAccounts() {
-        return accountRepository.findTop100ByOrderByAccountIdAsc();
+        return accountRepository.findTop100ByOrderByMaKhangAsc();
+    }
+
+    public List<Map<String, Object>> getBooks() {
+        try {
+            return monitoringQueryRepository.findBooks();
+        } catch (Exception e) {
+            log.error("Failed to query books: {}", e.getMessage());
+            return Collections.emptyList();
+        }
     }
 
     public List<Map<String, Object>> getAccountsWithStatus(String dtuongQly, String month, int period) {
@@ -75,9 +84,9 @@ public class MonitoringService {
         return billInvoiceRepository.findAll();
     }
 
-    public List<Map<String, Object>> getCalculationLogs(String dtuongQly, String accountId, String status, int limit) {
+    public List<Map<String, Object>> getCalculationLogs(String dtuongQly, String maKhang, String status, int limit) {
         try {
-            return monitoringQueryRepository.findCalculationLogs(dtuongQly, accountId, status, limit);
+            return monitoringQueryRepository.findCalculationLogs(dtuongQly, maKhang, status, limit);
         } catch (Exception e) {
             return Collections.emptyList();
         }
@@ -87,8 +96,8 @@ public class MonitoringService {
         return monitoringQueryRepository.findCalculationLogDetail(logId);
     }
 
-    public List<Map<String, Object>> getErrorLogs(String accountId, String month, Integer period, int limit) {
-        return monitoringQueryRepository.findErrorLogs(accountId, month, period, limit);
+    public List<Map<String, Object>> getErrorLogs(String maKhang, String month, Integer period, int limit) {
+        return monitoringQueryRepository.findErrorLogs(maKhang, month, period, limit);
     }
 
     public List<Map<String, Object>> getBatchExecutions() {
@@ -111,32 +120,32 @@ public class MonitoringService {
         return getBatchStepExecutions(ids.get(0));
     }
 
-    public Map<String, Object> getAccountDetail(String accountId, String month, int period) {
+    public Map<String, Object> getAccountDetail(String maKhang, String month, int period) {
         Map<String, Object> detail = new HashMap<>();
 
-        Optional<Account> accountOpt = accountRepository.findById(accountId);
+        Optional<Account> accountOpt = accountRepository.findById(maKhang);
         if (accountOpt.isEmpty()) {
             return null;
         }
         detail.put("account", accountOpt.get());
 
-        List<MeterUsage> usages = meterUsageRepository.findByMaKhangAndThangChuKyAndKyChot(accountId, month, period);
+        List<MeterUsage> usages = meterUsageRepository.findByMaKhangAndThangChuKyAndKyChot(maKhang, month, period);
         detail.put("readings", usages);
 
-        String snapshotId = accountId + "_" + month + "_p" + period + "_v1";
+        String snapshotId = maKhang + "_" + month + "_p" + period + "_v1";
         Optional<BillingAccountSnapshot> snapshotOpt = snapshotRepository.findById(snapshotId);
         detail.put("snapshot", snapshotOpt.orElse(null));
 
-        Optional<BillInvoice> invoiceOpt = billInvoiceRepository.findByMaKhangAndThangChuKyAndKyChot(accountId, month, period);
+        Optional<BillInvoice> invoiceOpt = billInvoiceRepository.findByMaKhangAndThangChuKyAndKyChot(maKhang, month, period);
         detail.put("invoice", invoiceOpt.orElse(null));
 
         return detail;
     }
 
-    public void sendReadingResolutionEvent(String resolutionType, String accountId, String month, String dtuongQly, Long usageId, BigDecimal correctedEndIndex) {
+    public void sendReadingResolutionEvent(String resolutionType, String maKhang, String month, String dtuongQly, Long usageId, BigDecimal correctedEndIndex) {
         ReadingResolutionEvent event = new ReadingResolutionEvent();
         event.setLoaiXuLy(resolutionType);
-        event.setMaKhang(accountId);
+        event.setMaKhang(maKhang);
         event.setThangChuKy(month);
         event.setDtuongQly(dtuongQly);
         if (usageId != null) {
@@ -148,14 +157,14 @@ public class MonitoringService {
 
         try {
             String json = objectMapper.writeValueAsString(event);
-            kafkaTemplate.send("meter-reading-resolutions", accountId, json);
-            log.info("[RESOLVE-API] Sent resolution command: {} for Account: {}", resolutionType, accountId);
+            kafkaTemplate.send("meter-reading-resolutions", maKhang, json);
+            log.info("[RESOLVE-API] Sent resolution command: {} for Account: {}", resolutionType, maKhang);
         } catch (Exception e) {
             throw new RuntimeException("Failed to publish resolution event: " + e.getMessage(), e);
         }
     }
 
-    public void sendBillingOperationEvent(String operationType, String accountId, String dtuongQly, String month, Integer period) {
+    public void sendBillingOperationEvent(String operationType, String maKhang, String dtuongQly, String month, Integer period) {
         String finalMonth = month;
         Integer finalPeriod = period;
 
@@ -177,9 +186,9 @@ public class MonitoringService {
                     log.warn("[OPERATIONS-API] Failed to find active book schedule for dtuongQly: {}.", dtuongQly);
                 }
             }
-        } else if (accountId != null && !accountId.isEmpty() && (finalMonth == null || finalMonth.isEmpty() || finalPeriod == null)) {
+        } else if (maKhang != null && !maKhang.isEmpty() && (finalMonth == null || finalMonth.isEmpty() || finalPeriod == null)) {
             try {
-                String actualDtuongQly = monitoringQueryRepository.findBookByAccountId(accountId);
+                String actualDtuongQly = monitoringQueryRepository.findBookByAccountId(maKhang);
                 if (actualDtuongQly != null) {
                     Optional<Map<String, Object>> scheduleOpt = monitoringQueryRepository.findLatestActiveScheduleByBook(actualDtuongQly);
                     if (scheduleOpt.isPresent()) {
@@ -193,7 +202,7 @@ public class MonitoringService {
                     }
                 }
             } catch (Exception e) {
-                log.warn("[OPERATIONS-API] Failed to resolve month/period for account: {}", accountId);
+                log.warn("[OPERATIONS-API] Failed to resolve month/period for account: {}", maKhang);
             }
         }
 
@@ -204,16 +213,16 @@ public class MonitoringService {
 
         Map<String, Object> event = new HashMap<>();
         event.put("operationType", operationType);
-        if (accountId != null) event.put("accountId", accountId);
+        if (maKhang != null) event.put("maKhang", maKhang);
         if (dtuongQly != null) event.put("dtuongQly", dtuongQly);
         event.put("billingCycleMonth", finalMonth);
         event.put("period", finalPeriod);
 
         try {
             String json = objectMapper.writeValueAsString(event);
-            String partitionKey = accountId != null ? accountId : dtuongQly;
+            String partitionKey = maKhang != null ? maKhang : dtuongQly;
             kafkaTemplate.send("billing-operations-topic", partitionKey, json);
-            log.info("[OPERATIONS-API] Sent billing operation command: {} for Account: {}, dtuongQly: {}", operationType, accountId, dtuongQly);
+            log.info("[OPERATIONS-API] Sent billing operation command: {} for Account: {}, dtuongQly: {}", operationType, maKhang, dtuongQly);
         } catch (Exception e) {
             throw new RuntimeException("Failed to publish billing operation event: " + e.getMessage(), e);
         }

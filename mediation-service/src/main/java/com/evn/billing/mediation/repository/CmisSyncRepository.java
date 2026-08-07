@@ -8,7 +8,8 @@ public interface CmisSyncRepository {
     void updatePriceRules(String maDdo, String maKhang, String newRulesJson);
     void upsertMeterRelation(String maDdoCha, String maDdoCon, String loaiQuanHe, String ngayHieuLuc, String ngayHetHan);
     void deleteMeterRelation(String maDdoCha, String maDdoCon);
-    void upsertTariff(String maBieuGia, String tenBieuGia, String loaiBieuGia, String ngayHieuLuc, String ngayHetHan, String quyetDinhPhapLy, String trangThai, String chiTietGiaJson);
+    void upsertTariff(String maBieuGia, String tenBieuGia, String loaiBieuGia, String ngayHieuLuc, String ngayHetHan, String quyetDinhPhapLy, String trangThai, String chiTietGiaJson,
+                      String maNhomnn, String khoang_da, String maNgiaCmis, String thoigianBdien, boolean bacThang, java.math.BigDecimal donGiaPhang);
     List<String> findAccountsByTariff(String maBieuGia);
     String findDtuongQlyByKhang(String maKhang);
     String findCurrentCto(String maDdo);

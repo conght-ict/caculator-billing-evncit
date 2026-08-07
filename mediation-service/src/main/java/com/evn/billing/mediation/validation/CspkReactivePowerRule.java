@@ -15,8 +15,8 @@ public class CspkReactivePowerRule implements ValidationRule {
     private AmrIngestionRepository repository;
 
     @Override
-    public void check(String accountId, String month, int period, ValidationResult result) {
-        List<Map<String, Object>> reactiveViolations = repository.getReactivePowerStatus(accountId, month, period);
+    public void check(String maKhang, String month, int period, ValidationResult result) {
+        List<Map<String, Object>> reactiveViolations = repository.getReactivePowerStatus(maKhang, month, period);
         if (!reactiveViolations.isEmpty()) {
             for (Map<String, Object> violation : reactiveViolations) {
                 String meterId = (String) violation.get("ma_ddo");

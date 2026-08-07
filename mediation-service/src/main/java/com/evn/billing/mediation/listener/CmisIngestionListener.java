@@ -62,8 +62,8 @@ public class CmisIngestionListener {
     /**
      * Helper to load account snapshot profile (Cache-aside using Redis & Postgres).
      */
-    public BillingConfigSnapshot getSnapshotConfig(String accountId, String month, int period) {
-        String cacheKey = "snapshot:" + accountId + ":" + month + ":" + period;
+    public BillingConfigSnapshot getSnapshotConfig(String maKhang, String month, int period) {
+        String cacheKey = "snapshot:" + maKhang + ":" + month + ":" + period;
         BillingConfigSnapshot config = null;
         try {
             String cachedJson = redisTemplate.opsForValue().get(cacheKey);
@@ -76,7 +76,7 @@ public class CmisIngestionListener {
 
         if (config == null) {
             Optional<BillingAccountSnapshot> snapshotOpt = snapshotRepository
-                    .findByMaKhangAndThangChuKyAndKyChotAndPhienBanTinh(accountId, month, period, 1);
+                    .findByMaKhangAndThangChuKyAndKyChotAndPhienBanTinh(maKhang, month, period, 1);
             if (snapshotOpt.isPresent()) {
                 config = snapshotOpt.get().getDuLieuCauHinh();
                 try {
@@ -246,7 +246,7 @@ public class CmisIngestionListener {
                     }
                     String dtuongQly = config.getDtuongQly();
                     validationError.put("dtuongQly", dtuongQly);
-                    validationError.put("accountId", event.getMaKhang());
+                    validationError.put("maKhang", event.getMaKhang());
                     validationError.put("meterPointId", event.getMaDdo());
                     validationError.put("billingCycleMonth", event.getThangChuKy());
                     validationError.put("usageId", generatedId);
@@ -385,21 +385,21 @@ public class CmisIngestionListener {
         }
     }
 
-    public void checkAndTriggerBilling(String accountId, String month, int period, String currentMeterPointId, long t1Ingest) {
-        BillingConfigSnapshot config = getSnapshotConfig(accountId, month, period);
-        checkAndTriggerBilling(accountId, month, period, currentMeterPointId, t1Ingest, config);
+    public void checkAndTriggerBilling(String maKhang, String month, int period, String currentMeterPointId, long t1Ingest) {
+        BillingConfigSnapshot config = getSnapshotConfig(maKhang, month, period);
+        checkAndTriggerBilling(maKhang, month, period, currentMeterPointId, t1Ingest, config);
     }
 
-    public void checkAndTriggerBilling(String accountId, String month, int period, String currentMeterPointId, long t1Ingest, BillingConfigSnapshot config) {
-        log.info("[INGESTION] Triggering billing check for Account: {}, Month: {}, Period: {}", accountId, month, period);
+    public void checkAndTriggerBilling(String maKhang, String month, int period, String currentMeterPointId, long t1Ingest, BillingConfigSnapshot config) {
+        log.info("[INGESTION] Triggering billing check for Account: {}, Month: {}, Period: {}", maKhang, month, period);
         
         if (config == null) {
-            log.warn("[INGESTION] Snapshot missing for Account: {}, Month: {}, Period: {}", accountId, month, period);
+            log.warn("[INGESTION] Snapshot missing for Account: {}, Month: {}, Period: {}", maKhang, month, period);
             return;
         }
 
         if (config.getDtuongQly() == null) {
-            throw new IllegalStateException("Snapshot configuration is missing dtuongQly for account: " + accountId);
+            throw new IllegalStateException("Snapshot configuration is missing dtuongQly for account: " + maKhang);
         }
         String dtuongQly = config.getDtuongQly();
  
@@ -410,7 +410,7 @@ public class CmisIngestionListener {
         }
  
         if (config.getMeterTopology() == null || config.getMeterTopology().getRootPoints() == null) {
-            log.warn("[INGESTION] Topology is null or root points null for Account: {}", accountId);
+            log.warn("[INGESTION] Topology is null or root points null for Account: {}", maKhang);
             return;
         }
 
@@ -425,7 +425,7 @@ public class CmisIngestionListener {
         Set<String> receivedReadings = new HashSet<>();
         
         // Fetch database for all validated readings of this account, month, period
-        List<MeterUsage> validatedUsages = meterUsageRepository.findByMaKhangAndThangChuKyAndKyChotAndTrangThaiXuLy(accountId, month, period, "VALIDATED");
+        List<MeterUsage> validatedUsages = meterUsageRepository.findByMaKhangAndThangChuKyAndKyChotAndTrangThaiXuLy(maKhang, month, period, "VALIDATED");
         
         // Filter validated usages to only keep the latest subReadingSeq for each meter register
         Map<String, MeterUsage> latestUsagesMap = new HashMap<>();
@@ -447,44 +447,44 @@ public class CmisIngestionListener {
             isComplete = true;
         }
 
-        log.info("[AUDIT-TRACER] [Account: {}] Step 3: Topology readiness check. Required registers: {}, Received registers: {}.", accountId, requiredReadings, receivedReadings);
+        log.info("[AUDIT-TRACER] [Account: {}] Step 3: Topology readiness check. Required registers: {}, Received registers: {}.", maKhang, requiredReadings, receivedReadings);
 
         if (isComplete) {
             // Log completeness success
-            amrIngestionRepository.logIngestionLifecycle(accountId, null, month, period, "COMPLETENESS", "COMPLETE", null, "SYSTEM");
+            amrIngestionRepository.logIngestionLifecycle(maKhang, null, month, period, "COMPLETENESS", "COMPLETE", null, "SYSTEM");
 
             // Run validation engine rules (Pmax, CSPK, Abnormal Spike) before triggering billing
-            com.evn.billing.mediation.validation.ValidationResult valResult = validationEngine.validate(accountId, month, period, config, validatedUsages);
+            com.evn.billing.mediation.validation.ValidationResult valResult = validationEngine.validate(maKhang, month, period, config, validatedUsages);
             if (!valResult.isValid()) {
                 String errorMsg = String.join("; ", valResult.getErrors());
-                log.warn("[INGESTION] Account {} failed validation check: {}. Updating status to PENDING_MANUAL.", accountId, errorMsg);
-                amrIngestionRepository.updateCustomerBillingStatus(accountId, month, period, valResult.getStatus(), errorMsg);
+                log.warn("[INGESTION] Account {} failed validation check: {}. Updating status to PENDING_MANUAL.", maKhang, errorMsg);
+                amrIngestionRepository.updateCustomerBillingStatus(maKhang, month, period, valResult.getStatus(), errorMsg);
                 
                 String errorsJson = null;
                 try {
                     errorsJson = objectMapper.writeValueAsString(valResult.getErrors());
                 } catch (Exception e) {}
-                amrIngestionRepository.logIngestionLifecycle(accountId, null, month, period, "VALIDATION", valResult.getStatus(), errorsJson, "SYSTEM");
+                amrIngestionRepository.logIngestionLifecycle(maKhang, null, month, period, "VALIDATION", valResult.getStatus(), errorsJson, "SYSTEM");
                 return;
             }
 
             // Log validation success
-            amrIngestionRepository.logIngestionLifecycle(accountId, null, month, period, "VALIDATION", "PASS", null, "SYSTEM");
+            amrIngestionRepository.logIngestionLifecycle(maKhang, null, month, period, "VALIDATION", "PASS", null, "SYSTEM");
 
-            if (!tryAcquireBillingTriggerGate(dtuongQly, accountId, month, period)) {
-                log.info("[INGESTION] Skip duplicate trigger for Account: {}, Month: {}, Period: {} because status gate is already claimed.", accountId, month, period);
+            if (!tryAcquireBillingTriggerGate(dtuongQly, maKhang, month, period)) {
+                log.info("[INGESTION] Skip duplicate trigger for Account: {}, Month: {}, Period: {} because status gate is already claimed.", maKhang, month, period);
                 return;
             }
 
-            log.info("[AUDIT-TRACER] [Account: {}] Step 3.1: Netting readiness verified. Triggering calculation task via Kafka.", accountId);
+            log.info("[AUDIT-TRACER] [Account: {}] Step 3.1: Netting readiness verified. Triggering calculation task via Kafka.", maKhang);
             
             // Send billing task to Kafka
             BillingTaskDto task = new BillingTaskDto();
-            task.setMaKhang(accountId);
+            task.setMaKhang(maKhang);
             task.setDtuongQly(dtuongQly);
             task.setThangChuKy(month);
             task.setKyChot(period);
-            int nextVersion = (int) billInvoiceRepository.countByMaKhangAndThangChuKyAndKyChot(accountId, month, period) + 1;
+            int nextVersion = (int) billInvoiceRepository.countByMaKhangAndThangChuKyAndKyChot(maKhang, month, period) + 1;
             task.setPhienBanTinh(nextVersion);
             task.setTraceId(UUID.randomUUID().toString().replace("-", ""));
             task.setTriggeredBy("ROLLING");
@@ -526,14 +526,14 @@ public class CmisIngestionListener {
             task.setDanhSachChiSo(readings);
 
             long t2Send = System.currentTimeMillis();
-            ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("billing-execution-topic", accountId, task);
+            ProducerRecord<String, Object> producerRecord = new ProducerRecord<>("billing-execution-topic", maKhang, task);
             producerRecord.headers().add("t1_ingest", ByteBuffer.allocate(8).putLong(t1Ingest).array());
             producerRecord.headers().add("t2_send", ByteBuffer.allocate(8).putLong(t2Send).array());
 
             kafkaTemplate.send(producerRecord);
-            log.info("[INGESTION] Successfully sent billing task to billing-execution-topic for Account: {}", accountId);
+            log.info("[INGESTION] Successfully sent billing task to billing-execution-topic for Account: {}", maKhang);
         } else {
-            log.info("[INGESTION] Account {} is missing readings. Required: {}, Received: {}", accountId, requiredReadings, receivedReadings);
+            log.info("[INGESTION] Account {} is missing readings. Required: {}, Received: {}", maKhang, requiredReadings, receivedReadings);
             
             // Log missing registers into trang_thai_tinh_toan_kh to allow CMIS/Portal queries
             try {
@@ -545,8 +545,8 @@ public class CmisIngestionListener {
                 errorMap.put("missing_registers", missing);
                 String missingStr = objectMapper.writeValueAsString(errorMap);
  
-                amrIngestionRepository.logIncompleteStatus(accountId, month, dtuongQly, period, missingStr);
-                log.info("[INGESTION] Logged INCOMPLETE status for Account: {} due to: {}", accountId, missingStr);
+                amrIngestionRepository.logIncompleteStatus(maKhang, month, dtuongQly, period, missingStr);
+                log.info("[INGESTION] Logged INCOMPLETE status for Account: {} due to: {}", maKhang, missingStr);
 
                 Map<String, Object> compDetail = new HashMap<>();
                 compDetail.put("required", requiredReadings);
@@ -556,15 +556,15 @@ public class CmisIngestionListener {
                 try {
                     compDetailJson = objectMapper.writeValueAsString(compDetail);
                 } catch (Exception e) {}
-                amrIngestionRepository.logIngestionLifecycle(accountId, null, month, period, "COMPLETENESS", "INCOMPLETE", compDetailJson, "SYSTEM");
+                amrIngestionRepository.logIngestionLifecycle(maKhang, null, month, period, "COMPLETENESS", "INCOMPLETE", compDetailJson, "SYSTEM");
             } catch (Exception e) {
-                log.error("[INGESTION] Failed to log INCOMPLETE status for Account: {}", accountId, e);
+                log.error("[INGESTION] Failed to log INCOMPLETE status for Account: {}", maKhang, e);
             }
         }
     }
 
-    private boolean tryAcquireBillingTriggerGate(String dtuongQly, String accountId, String month, int period) {
-        return amrIngestionRepository.tryAcquireBillingTriggerGate(dtuongQly, accountId, month, period);
+    private boolean tryAcquireBillingTriggerGate(String dtuongQly, String maKhang, String month, int period) {
+        return amrIngestionRepository.tryAcquireBillingTriggerGate(dtuongQly, maKhang, month, period);
     }
 
     public Map<String, BillingConfigSnapshot> batchLoadConfigs(
@@ -617,10 +617,10 @@ public class CmisIngestionListener {
 
         List<String> cacheKeys = new ArrayList<>();
         Map<String, String> keyToAccountId = new HashMap<>();
-        for (String accountId : accountIds) {
-            String key = "snapshot:" + accountId + ":" + month + ":" + period;
+        for (String maKhang : accountIds) {
+            String key = "snapshot:" + maKhang + ":" + month + ":" + period;
             cacheKeys.add(key);
-            keyToAccountId.put(key, accountId);
+            keyToAccountId.put(key, maKhang);
         }
 
         List<String> cachedJsons = null;
@@ -635,17 +635,17 @@ public class CmisIngestionListener {
             for (int i = 0; i < cacheKeys.size(); i++) {
                 String key = cacheKeys.get(i);
                 String json = cachedJsons.get(i);
-                String accountId = keyToAccountId.get(key);
+                String maKhang = keyToAccountId.get(key);
                 if (json != null) {
                     try {
                         BillingConfigSnapshot config = objectMapper.readValue(json, BillingConfigSnapshot.class);
-                        result.put(accountId, config);
+                        result.put(maKhang, config);
                     } catch (Exception e) {
-                        log.error("Failed to parse cached snapshot for account: {}, error: {}", accountId, e.getMessage());
-                        missingAccountIds.add(accountId);
+                        log.error("Failed to parse cached snapshot for account: {}, error: {}", maKhang, e.getMessage());
+                        missingAccountIds.add(maKhang);
                     }
                 } else {
-                    missingAccountIds.add(accountId);
+                    missingAccountIds.add(maKhang);
                 }
             }
         } else {

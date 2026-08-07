@@ -47,7 +47,7 @@ spec:
           name: http-metrics
         livenessProbe:
           httpGet:
-            path: /actuator/health/liveness
+            path: /worker/actuator/health/liveness
             port: 8081
           initialDelaySeconds: 30
           periodSeconds: 10
@@ -55,7 +55,7 @@ spec:
           failureThreshold: 5
         readinessProbe:
           httpGet:
-            path: /actuator/health/readiness
+            path: /worker/actuator/health/readiness
             port: 8081
           initialDelaySeconds: 20
           periodSeconds: 5

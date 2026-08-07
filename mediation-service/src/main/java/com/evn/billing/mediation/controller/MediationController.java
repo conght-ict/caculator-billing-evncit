@@ -16,10 +16,10 @@ public class MediationController {
     @Autowired
     private ReadingsService readingsService;
 
-    @PostMapping("/readings")
+    @PostMapping("/readings/legacy")
     public ResponseEntity<String> receiveReadings(@RequestBody List<ReadingDto> readings) {
         readingsService.processAndSaveReadings(readings);
-        return ResponseEntity.status(HttpStatus.ACCEPTED).body("Readings processed and saved.");
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body("Legacy readings processed and saved.");
     }
 
     public static class ReadingDto {

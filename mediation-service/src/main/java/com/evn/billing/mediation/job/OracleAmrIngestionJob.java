@@ -50,14 +50,14 @@ public class OracleAmrIngestionJob {
     public static class PendingReadingTarget {
         public final String meterId;
         public final String bcs;
-        public final String accountId;
+        public final String maKhang;
         public final String maCto;
         public final java.math.BigDecimal heSoNhan;
 
-        public PendingReadingTarget(String meterId, String bcs, String accountId, String maCto, java.math.BigDecimal heSoNhan) {
+        public PendingReadingTarget(String meterId, String bcs, String maKhang, String maCto, java.math.BigDecimal heSoNhan) {
             this.meterId = meterId;
             this.bcs = bcs;
-            this.accountId = accountId;
+            this.maKhang = maKhang;
             this.maCto = maCto;
             this.heSoNhan = heSoNhan;
         }
@@ -162,11 +162,11 @@ public class OracleAmrIngestionJob {
                     ingestedMap.computeIfAbsent(mId, k -> new HashSet<>()).add(bcs + ":" + maCto);
                 }
 
-                // Determine which specific (meterPoint, bcs, accountId) are pending
+                // Determine which specific (meterPoint, bcs, maKhang) are pending
                 List<PendingReadingTarget> pendingTargets = new ArrayList<>();
                 for (Map<String, Object> m : activeMeters) {
                     String meterId = (String) m.get("ma_ddo");
-                    String accountId = (String) m.get("ma_khang");
+                    String maKhang = (String) m.get("ma_khang");
                     String infoCto = (String) m.get("thong_tin_cto");
                     int loaiDdo = m.containsKey("loai_ddo") && m.get("loai_ddo") != null ? ((Number) m.get("loai_ddo")).intValue() : 1;
 
@@ -214,7 +214,7 @@ public class OracleAmrIngestionJob {
                             for (String bcs : bcsList) {
                                 String checkKey = bcs + ":" + maCto;
                                 if (!ingestedBcs.contains(checkKey)) {
-                                    pendingTargets.add(new PendingReadingTarget(meterId, bcs, accountId, maCto, heSoNhan));
+                                    pendingTargets.add(new PendingReadingTarget(meterId, bcs, maKhang, maCto, heSoNhan));
                                 }
                             }
                         }
@@ -289,7 +289,7 @@ public class OracleAmrIngestionJob {
                 Set<String> failedAccountIds = new HashSet<>();
                 for (Map<String, Object> m : activeMeters) {
                     String meterId = (String) m.get("ma_ddo");
-                    String accountId = (String) m.get("ma_khang");
+                    String maKhang = (String) m.get("ma_khang");
                     String infoCto = (String) m.get("thong_tin_cto");
                     int loaiDdo = m.containsKey("loai_ddo") && m.get("loai_ddo") != null ? ((Number) m.get("loai_ddo")).intValue() : 1;
 
@@ -324,7 +324,7 @@ public class OracleAmrIngestionJob {
                                 String checkKey = bcs + ":" + maCto;
                                 if (!ingestedBcs.contains(checkKey)) {
                                     stillHasPending = true;
-                                    failedAccountIds.add(accountId);
+                                    failedAccountIds.add(maKhang);
                                 }
                             }
                         }
@@ -404,7 +404,7 @@ public class OracleAmrIngestionJob {
             List<PendingReadingTarget> pendingTargets = new ArrayList<>();
             for (Map<String, Object> m : activeMeters) {
                 String meterId = (String) m.get("ma_ddo");
-                String accountId = (String) m.get("ma_khang");
+                String maKhang = (String) m.get("ma_khang");
                 String infoCto = (String) m.get("thong_tin_cto");
                 int loaiDdo = m.containsKey("loai_ddo") && m.get("loai_ddo") != null ? ((Number) m.get("loai_ddo")).intValue() : 1;
 
@@ -452,7 +452,7 @@ public class OracleAmrIngestionJob {
                         for (String bcs : bcsList) {
                             String checkKey = bcs + ":" + maCto;
                             if (!ingestedBcs.contains(checkKey)) {
-                                pendingTargets.add(new PendingReadingTarget(meterId, bcs, accountId, maCto, heSoNhan));
+                                pendingTargets.add(new PendingReadingTarget(meterId, bcs, maKhang, maCto, heSoNhan));
                             }
                         }
                     }
@@ -574,7 +574,7 @@ public class OracleAmrIngestionJob {
                 if (!"VALIDATED".equals(status)) {
                     try {
                         Map<String, Object> validationError = new HashMap<>();
-                        validationError.put("accountId", target.accountId);
+                        validationError.put("maKhang", target.maKhang);
                         validationError.put("meterPointId", target.meterId);
                         validationError.put("bcs", target.bcs);
                         validationError.put("billingCycleMonth", month + "_" + period);
@@ -584,7 +584,7 @@ public class OracleAmrIngestionJob {
                         validationError.put("endIndex", end);
                         validationError.put("timestamp", LocalDateTime.now().toString());
 
-                        kafkaTemplate.send("meter-reading-validation-results", target.accountId, objectMapper.writeValueAsString(validationError));
+                        kafkaTemplate.send("meter-reading-validation-results", target.maKhang, objectMapper.writeValueAsString(validationError));
                     } catch (Exception e) {
                         log.error("Failed to publish validation error: {}", e.getMessage());
                     }
@@ -593,7 +593,7 @@ public class OracleAmrIngestionJob {
                 batchInsertParams.add(new Object[] {
                         generatedId,
                         1, // lan_doc_phu
-                        target.accountId,
+                        target.maKhang,
                         target.meterId,
                         month,
                         period,
@@ -608,7 +608,7 @@ public class OracleAmrIngestionJob {
                         target.maCto // ma_cto
                 });
 
-                processedAccounts.add(target.accountId);
+                processedAccounts.add(target.maKhang);
 
                 // Set processed cache in Redis
                 String redisKey = "processed:meters:" + month + ":" + period;
@@ -624,7 +624,7 @@ public class OracleAmrIngestionJob {
                 // Trigger Completeness and Calculation for each unique processed account
                 for (String accId : processedAccounts) {
                     String indicatorMeter = chunk.stream()
-                            .filter(t -> t.accountId.equals(accId))
+                            .filter(t -> t.maKhang.equals(accId))
                             .map(t -> t.meterId)
                             .findFirst()
                             .orElse("UNKNOWN");

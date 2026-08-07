@@ -35,12 +35,12 @@ public class ConfigCacheEvictionListener {
             String evictType = (String) event.get("evictType"); // SNAPSHOT | TARIFF | ALL
             
             if ("SNAPSHOT".equalsIgnoreCase(evictType)) {
-                String accountId = (String) event.get("accountId");
+                String maKhang = (String) event.get("maKhang");
                 String month = (String) event.get("billingCycleMonth");
                 Integer period = (Integer) event.get("period");
                 if (period == null) period = 1;
                 
-                String cacheKey = "snapshot:" + accountId + ":" + month + ":" + period;
+                String cacheKey = "snapshot:" + maKhang + ":" + month + ":" + period;
                 Boolean deleted = redisTemplate.delete(cacheKey);
                 log.info("[CACHE-EVICTION] Evicted snapshot cache for key: {} (Result: {})", cacheKey, deleted);
                 

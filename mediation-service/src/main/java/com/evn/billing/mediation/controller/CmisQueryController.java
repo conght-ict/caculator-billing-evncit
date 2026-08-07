@@ -20,11 +20,11 @@ public class CmisQueryController {
 
     @PostMapping
     public ResponseEntity<?> getInvoice(@RequestBody InvoiceQueryRequest request) {
-        String accountId = request.getMaKhang();
+        String maKhang = request.getMaKhang();
         String month = request.getThangChuKy();
         int period = request.getKyChot() != null ? request.getKyChot() : 1;
 
-        Optional<BillInvoice> invoiceOpt = cmisQueryService.getOrCalculateInvoice(accountId, month, period);
+        Optional<BillInvoice> invoiceOpt = cmisQueryService.getOrCalculateInvoice(maKhang, month, period);
         if (invoiceOpt.isPresent()) {
             return ResponseEntity.ok(invoiceOpt.get());
         }

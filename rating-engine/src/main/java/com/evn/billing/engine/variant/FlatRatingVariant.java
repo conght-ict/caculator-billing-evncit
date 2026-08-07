@@ -35,8 +35,18 @@ public class FlatRatingVariant implements BillingVariant {
             throw new NoSuchElementException("Tariff configuration missing for code: " + tariffCode);
         }
 
-        List<RatingStepEngine.StepResult> stepResults = ratingStepEngine.calculateSteppingTariff(
-                consumption, rules.getBlocks(), 1);
+        List<RatingStepEngine.StepResult> stepResults;
+        if (!rules.isBacThang() && rules.getDonGiaPhang() != null) {
+            RatingStepEngine.StepResult singleResult = new RatingStepEngine.StepResult();
+            singleResult.setStep(1);
+            singleResult.setKwhConsumed(consumption.setScale(2, RoundingMode.HALF_UP));
+            singleResult.setUnitPrice(rules.getDonGiaPhang());
+            singleResult.setAmount(singleResult.getKwhConsumed().multiply(singleResult.getUnitPrice()).setScale(2, RoundingMode.HALF_UP));
+            stepResults = List.of(singleResult);
+        } else {
+            stepResults = ratingStepEngine.calculateSteppingTariff(
+                    consumption, rules.getBlocks(), 1);
+        }
 
         BigDecimal totalAmount = BigDecimal.ZERO;
         for (RatingStepEngine.StepResult r : stepResults) {

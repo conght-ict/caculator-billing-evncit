@@ -15,4 +15,6 @@ public class PriceApplicationRule {
     private String maNgia; // ma_ngia
     private int soHo; // so_ho (normsFactor for stepping)
     private String maCapda; // ma_capda
+    private String maNhomnn;
+    private boolean bacThang;
 }

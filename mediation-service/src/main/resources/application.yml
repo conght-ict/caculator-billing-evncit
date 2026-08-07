@@ -1,14 +1,23 @@
 server:
   port: 8080
+  servlet:
+    context-path: /mediation
 
 billing:
   mock:
     auto-readings:
       enabled: false
+  snapshot:
+    url: ${SNAPSHOT_SERVICE_URL:http://localhost:8082/snapshot}
 
 spring:
   application:
     name: mediation-service
+  batch:
+    job:
+      enabled: false
+    jdbc:
+      initialize-schema: always
   data:
     redis:
       host: ${REDIS_HOST:localhost}

@@ -35,13 +35,13 @@ public class ExceptionPortalServiceImpl implements ExceptionPortalService {
         // 1. Resolve exception in DB (mark OLD as REPLACED, INSERT NEW as VALIDATED)
         exceptionPortalRepository.resolveException(usageId, month, correctedEndIndex, operatorNote);
 
-        // 2. Query accountId and period to trigger recalculation pipeline via Repository
+        // 2. Query maKhang and period to trigger recalculation pipeline via Repository
         Map<String, Object> details = exceptionPortalRepository.findAccountAndPeriodByUsageId(usageId, month);
-        String accountId = (String) details.get("ma_khang");
+        String maKhang = (String) details.get("ma_khang");
         int period = ((Number) details.get("ky_chot")).intValue();
 
         // 3. Trigger validation check and automatic billing calculation asynchronously
-        cmisIngestionListener.checkAndTriggerBilling(accountId, month, period, null, System.currentTimeMillis());
+        cmisIngestionListener.checkAndTriggerBilling(maKhang, month, period, null, System.currentTimeMillis());
     }
 
     @Override

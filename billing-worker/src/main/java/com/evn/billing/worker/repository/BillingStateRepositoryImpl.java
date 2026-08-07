@@ -3,6 +3,8 @@ package com.evn.billing.worker.repository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
@@ -20,24 +22,26 @@ public class BillingStateRepositoryImpl implements BillingStateRepository {
     private JdbcTemplate jdbcTemplate;
 
     @Override
-    public int tryClaimProcessingWorker(String workerNodeId, String accountId, String month, int period, int claimTimeoutMinutes) {
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public int tryClaimProcessingWorker(String workerNodeId, String maKhang, String month, int period, int claimTimeoutMinutes) {
         String sql = "UPDATE trang_thai_tinh_toan_kh SET ten_worker = ?, updated_at = NOW() " +
                 "WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ? AND trang_thai = 'PROCESSING' " +
                 "AND (ten_worker IS NULL OR updated_at < NOW() - (? * INTERVAL '1 minute'))";
-        return jdbcTemplate.update(sql, workerNodeId, accountId, month, period, claimTimeoutMinutes);
+        return jdbcTemplate.update(sql, workerNodeId, maKhang, month, period, claimTimeoutMinutes);
     }
 
     @Override
-    public void seedProcessingStatus(String accountId, String month, String dtuongQly, int period, String workerNode) {
+    public void seedProcessingStatus(String maKhang, String month, String dtuongQly, int period, String workerNode) {
         String seedSql = "INSERT INTO trang_thai_tinh_toan_kh " +
                 "(ma_khang, thang_chu_ky, dtuong_qly, ky_chot, trang_thai, ten_worker, updated_at) " +
                 "VALUES (?, ?, ?, ?, 'PROCESSING', ?, NOW()) " +
                 "ON CONFLICT (ma_khang, thang_chu_ky, ky_chot) DO NOTHING";
-        jdbcTemplate.update(seedSql, accountId, month, dtuongQly, period, workerNode);
+        jdbcTemplate.update(seedSql, maKhang, month, dtuongQly, period, workerNode);
     }
 
     @Override
-    public int updateProcessingStatus(String status, String invoiceId, String errorMsg, Long durationMs, String workerNode, String dtuongQly, String accountId, String month, int period) {
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public int updateProcessingStatus(String status, String invoiceId, String errorMsg, Long durationMs, String workerNode, String dtuongQly, String maKhang, String month, int period) {
         String updateSql = "UPDATE trang_thai_tinh_toan_kh SET " +
                 "trang_thai = ?, id_hoa_don = ?, thong_bao_loi = ?, thoi_gian_xu_ly_ms = ?, ten_worker = ?, dtuong_qly = ?, updated_at = NOW() " +
                 "WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ? AND trang_thai = 'PROCESSING' " +
@@ -50,7 +54,7 @@ public class BillingStateRepositoryImpl implements BillingStateRepository {
                 durationMs,
                 workerNode,
                 dtuongQly,
-                accountId,
+                maKhang,
                 month,
                 period,
                 workerNode
@@ -59,24 +63,24 @@ public class BillingStateRepositoryImpl implements BillingStateRepository {
 
     @Override
     public void updateBookBillingRunProgress(String dtuongQly, String month, int period, int processedDelta, int successDelta, int failedDelta) {
-        String sql = "UPDATE lich_ghi_chi_so SET " +
-                "so_kh_da_xu_ly = GREATEST(0, so_kh_da_xu_ly + ?), " +
-                "so_kh_thanh_cong = GREATEST(0, so_kh_thanh_cong + ?), " +
-                "so_kh_that_bai = GREATEST(0, so_kh_that_bai + ?), " +
+        String sql = "UPDATE lich_ghi_dqly SET " +
+                "kh_da_xl = GREATEST(0, kh_da_xl + ?), " +
+                "kh_tc = GREATEST(0, kh_tc + ?), " +
+                "kh_tb = GREATEST(0, kh_tb + ?), " +
                 "updated_at = NOW() " +
-                "WHERE ma_sogcs = ? AND thang_chu_ky = ? AND ky_chot = ?";
+                "WHERE dtuong_qly = ? AND thang_ck = ? AND ky_chot = ?";
         jdbcTemplate.update(sql, processedDelta, successDelta, failedDelta, dtuongQly, month, period);
     }
 
     @Override
-    public void upsertInvoice(String invoiceId, String accountId, String dtuongQly, String month, BigDecimal totalBeforeTax, BigDecimal taxAmount, BigDecimal totalAfterTax, String idempotencyKey, String manifestJson, boolean isProrated, String refSnapshot, String status, String maDviqly, Timestamp createdAt, Timestamp updatedAt) {
+    public void upsertInvoice(String invoiceId, String maKhang, String dtuongQly, String month, BigDecimal totalBeforeTax, BigDecimal taxAmount, BigDecimal totalAfterTax, String idempotencyKey, String manifestJson, boolean isProrated, String refSnapshot, String status, String maDviqly, Timestamp createdAt, Timestamp updatedAt) {
         String insertInvoiceSql = "INSERT INTO hoa_don (" +
-                "id_hoa_don, ma_khang, ma_sogcs, thang_chu_ky, " +
+                "id_hoa_don, ma_khang, dtuong_qly, thang_chu_ky, " +
                 "tong_tien_truoc_thue, tien_thue, tong_tien_sau_thue, " +
                 "khoa_lap_trung, ban_ke_tinh_toan, ap_dung_phan_bo, " +
                 "ref_snapshot, trang_thai_tinh_toan, ma_dviqly, created_at, updated_at) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?) " +
-                "ON CONFLICT (khoa_lap_trung) " +
+                "ON CONFLICT (khoa_lap_trung, thang_chu_ky) " +
                 "DO UPDATE SET " +
                 "tong_tien_truoc_thue = EXCLUDED.tong_tien_truoc_thue, " +
                 "tien_thue            = EXCLUDED.tien_thue, " +
@@ -90,7 +94,7 @@ public class BillingStateRepositoryImpl implements BillingStateRepository {
 
         jdbcTemplate.update(
                 insertInvoiceSql,
-                invoiceId, accountId, dtuongQly, month,
+                invoiceId, maKhang, dtuongQly, month,
                 totalBeforeTax, taxAmount, totalAfterTax,
                 idempotencyKey, manifestJson, isProrated,
                 refSnapshot, status, maDviqly, createdAt, updatedAt
@@ -98,10 +102,10 @@ public class BillingStateRepositoryImpl implements BillingStateRepository {
     }
 
     @Override
-    public void lockSnapshot(String accountId, String month, int period, int version) {
+    public void lockSnapshot(String maKhang, String month, int period, int version) {
         String lockSnapshotSql = "UPDATE snapshot_tinh_toan SET trang_thai = 'LOCKED' " +
                 "WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ? AND phien_ban_tinh = ?";
-        jdbcTemplate.update(lockSnapshotSql, accountId, month, period, version);
+        jdbcTemplate.update(lockSnapshotSql, maKhang, month, period, version);
     }
 
     @Override
@@ -115,12 +119,12 @@ public class BillingStateRepositoryImpl implements BillingStateRepository {
     @Override
     public void batchUpsertInvoices(List<Object[]> invoiceBatch) {
         String insertInvoiceSql = "INSERT INTO hoa_don (" +
-                "id_hoa_don, ma_khang, ma_sogcs, thang_chu_ky, ky_chot, " +
+                "id_hoa_don, ma_khang, dtuong_qly, thang_chu_ky, ky_chot, " +
                 "tong_tien_truoc_thue, tien_thue, tong_tien_sau_thue, " +
                 "khoa_lap_trung, ban_ke_tinh_toan, ap_dung_phan_bo, " +
                 "ref_snapshot, trang_thai_tinh_toan, ma_dviqly, created_at, updated_at) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?) " +
-                "ON CONFLICT (khoa_lap_trung) " +
+                "ON CONFLICT (khoa_lap_trung, thang_chu_ky) " +
                 "DO UPDATE SET " +
                 "tong_tien_truoc_thue = EXCLUDED.tong_tien_truoc_thue, " +
                 "tien_thue            = EXCLUDED.tien_thue, " +
@@ -143,6 +147,7 @@ public class BillingStateRepositoryImpl implements BillingStateRepository {
     }
 
     @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void batchUpsertStatuses(List<Object[]> statusBatch) {
         String insertStatusSql = "INSERT INTO trang_thai_tinh_toan_kh (ma_khang, thang_chu_ky, dtuong_qly, ky_chot, trang_thai, id_hoa_don, thong_bao_loi, ten_worker, updated_at) " +
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) " +
@@ -166,40 +171,48 @@ public class BillingStateRepositoryImpl implements BillingStateRepository {
     }
 
     @Override
-    public Map<String, Object> findStatusRowForUpdate(String accountId, String month, int period) {
+    public Map<String, Object> findStatusRowForUpdate(String maKhang, String month, int period) {
         String sql = "SELECT dtuong_qly, trang_thai FROM trang_thai_tinh_toan_kh WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ? FOR UPDATE";
-        return jdbcTemplate.queryForMap(sql, accountId, month, period);
+        return jdbcTemplate.queryForMap(sql, maKhang, month, period);
     }
 
     @Override
-    public void updateAccountStatus(String targetStatus, String accountId, String month, int period) {
-        jdbcTemplate.update(
-                "UPDATE trang_thai_tinh_toan_kh SET trang_thai = ?, thong_bao_loi = NULL, updated_at = NOW() WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ?",
-                targetStatus, accountId, month, period
-        );
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void updateAccountStatus(String targetStatus, String maKhang, String month, int period) {
+        if ("PROCESSING".equals(targetStatus)) {
+            jdbcTemplate.update(
+                    "UPDATE trang_thai_tinh_toan_kh SET trang_thai = ?, ten_worker = NULL, thong_bao_loi = NULL, updated_at = NOW() WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ?",
+                    targetStatus, maKhang, month, period
+            );
+        } else {
+            jdbcTemplate.update(
+                    "UPDATE trang_thai_tinh_toan_kh SET trang_thai = ?, thong_bao_loi = NULL, updated_at = NOW() WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ?",
+                    targetStatus, maKhang, month, period
+            );
+        }
     }
 
     @Override
-    public void markInvoicesCancelled(String accountId, String month, int period) {
+    public void markInvoicesCancelled(String maKhang, String month, int period) {
         jdbcTemplate.update(
                 "UPDATE hoa_don SET trang_thai_tinh_toan = 'CANCELLED', updated_at = NOW() WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ? AND trang_thai_tinh_toan != 'CANCELLED'",
-                accountId, month, period
+                maKhang, month, period
         );
     }
 
     @Override
-    public void setSnapshotsDraft(String accountId, String month, int period) {
+    public void setSnapshotsDraft(String maKhang, String month, int period) {
         jdbcTemplate.update(
                 "UPDATE snapshot_tinh_toan SET trang_thai = 'DRAFT' WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ?",
-                accountId, month, period
+                maKhang, month, period
         );
     }
 
     @Override
-    public void markAccountCancelled(String accountId, String month, int period, String message) {
+    public void markAccountCancelled(String maKhang, String month, int period, String message) {
         jdbcTemplate.update(
                 "UPDATE trang_thai_tinh_toan_kh SET trang_thai = 'CANCELLED', id_hoa_don = NULL, thong_bao_loi = ?, updated_at = NOW() WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ?",
-                message, accountId, month, period
+                message, maKhang, month, period
         );
     }
 
@@ -313,11 +326,11 @@ public class BillingStateRepositoryImpl implements BillingStateRepository {
     }
 
     @Override
-    public void rejectAccountByCmis(String accountId, String month, int period, String message) {
+    public void rejectAccountByCmis(String maKhang, String month, int period, String message) {
         jdbcTemplate.update(
                 "UPDATE trang_thai_tinh_toan_kh SET trang_thai = 'REJECTED_CMIS', thong_bao_loi = ?, updated_at = NOW() " +
                         "WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ?",
-                message, accountId, month, period
+                message, maKhang, month, period
         );
     }
 

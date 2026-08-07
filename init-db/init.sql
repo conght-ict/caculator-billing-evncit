@@ -106,16 +106,43 @@ CREATE INDEX idx_qh_ddo_cha ON quan_he_diem_do(ma_ddo_cha);
 
 -- 5. Cấu Hình Biểu Giá (Lưu các bậc thang dạng JSONB để nạp O(1) Memory Cache)
 CREATE TABLE bieu_gia (
-    ma_bieu_gia         VARCHAR(50) PRIMARY KEY,
-    ten_bieu_gia        VARCHAR(200) NOT NULL,
+    ma_bieu_gia         VARCHAR(100) PRIMARY KEY,
+    ten_bieu_gia        VARCHAR(500),
     loai_bieu_gia       VARCHAR(20) NOT NULL, -- STEPPING | FLAT | TOU
+    ma_nhomnn           VARCHAR(20) NOT NULL,
+    khoang_da           VARCHAR(5),
+    ma_ngia_cmis        VARCHAR(10),
+    thoigian_bdien      VARCHAR(5),
+    bac_thang           BOOLEAN NOT NULL DEFAULT FALSE,
+    don_gia_phang       DECIMAL(15,2),
     ngay_hieu_luc       DATE NOT NULL,
     ngay_het_han        DATE,
     quyet_dinh_phap_ly  VARCHAR(300),
-    chi_tiet_gia        JSONB NOT NULL, -- Mảng các bậc thang [TariffBlock] (step, minKwh, maxKwh, unitPrice...)
+    chi_tiet_gia        JSONB, -- Mảng các bậc thang [TariffBlock] (step, minKwh, maxKwh, unitPrice...)
+    trang_thai          VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
     created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX idx_bieu_gia_cmis_mapping ON bieu_gia(ma_nhomnn, khoang_da, ma_ngia_cmis, thoigian_bdien);
 CREATE INDEX idx_bieu_gia_temporal ON bieu_gia(loai_bieu_gia, ngay_hieu_luc, ngay_het_han);
+
+-- 5b. Cấu hình Hệ Số Cosphi
+CREATE TABLE IF NOT EXISTS cau_hinh_cosfi (
+    hs_cosfi            DECIMAL(3,2) PRIMARY KEY,
+    kcosfi              DECIMAL(5,2) NOT NULL,
+    ngay_adung          DATE NOT NULL
+);
+
+-- 5c. Tỷ Giá Ngoại Tệ Quy Đổi
+CREATE TABLE IF NOT EXISTS ty_gia (
+    ma_dviqly           VARCHAR(6) NOT NULL,
+    id_ty_gia           INT NOT NULL,
+    loai_tien           VARCHAR(5) NOT NULL,
+    tygia_qdoi          DECIMAL(10,2) NOT NULL,
+    thang               INT NOT NULL,
+    nam                 INT NOT NULL,
+    ngay_nhap           TIMESTAMP NOT NULL,
+    PRIMARY KEY (ma_dviqly, loai_tien, thang, nam)
+);
 
 -- 6. Chỉ Số Điện Năng (Áp dụng Partition theo thang_chu_ky)
 CREATE TABLE chi_so_dien_nang (
@@ -205,7 +232,7 @@ CREATE INDEX idx_snapshot_tinh_toan_jsonb
 CREATE TABLE hoa_don (
     id_hoa_don              VARCHAR(100) NOT NULL,
     ma_khang                VARCHAR(50) NOT NULL,
-    ma_sogcs                VARCHAR(50) NOT NULL, -- dtuong_qly
+    dtuong_qly              VARCHAR(50) NOT NULL,
     thang_chu_ky            VARCHAR(20) NOT NULL,
     ky_chot                 INT NOT NULL DEFAULT 1,
     tong_tien_truoc_thue    DECIMAL(15,2) NOT NULL,
@@ -233,7 +260,7 @@ CREATE TABLE hoa_don_2026_08 PARTITION OF hoa_don FOR VALUES IN ('2026_08');
 CREATE TABLE hoa_don_default PARTITION OF hoa_don DEFAULT;
 
 CREATE INDEX idx_hoa_don_khang ON hoa_don(ma_khang, thang_chu_ky);
-CREATE INDEX idx_hoa_don_dqly ON hoa_don(ma_sogcs, thang_chu_ky);
+CREATE INDEX idx_hoa_don_dqly ON hoa_don(dtuong_qly, thang_chu_ky);
 
 -- 9. Sự Kiện Outbox
 CREATE TABLE su_kien_outbox (

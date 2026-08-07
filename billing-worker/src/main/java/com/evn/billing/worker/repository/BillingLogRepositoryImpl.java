@@ -24,7 +24,7 @@ public class BillingLogRepositoryImpl implements BillingLogRepository {
             batchArgs.add(new Object[] {
                     e.logId.toString(),
                     e.dtuongQly,
-                    e.accountId,
+                    e.maKhang,
                     e.billingCycleMonth,
                     e.period,
                     e.status,

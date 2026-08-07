@@ -1,11 +1,11 @@
 package com.evn.billing.mediation.validation;
 
+import com.evn.billing.mediation.repository.ValidationQueryRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.springframework.jdbc.core.JdbcTemplate;
 import java.math.BigDecimal;
 import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
@@ -14,7 +14,7 @@ import static org.mockito.Mockito.*;
 public class NpcDecimalTruncationRuleTest {
 
     @Mock
-    private JdbcTemplate jdbcTemplate;
+    private ValidationQueryRepository validationQueryRepository;
 
     @InjectMocks
     private NpcDecimalTruncationRule rule;
@@ -27,26 +27,26 @@ public class NpcDecimalTruncationRuleTest {
     @Test
     public void testBypassNonNpc() {
         // Given a Hanoi customer (PD0100 -> HN)
-        String accountId = "KH_HANOI";
-        when(jdbcTemplate.queryForObject(anyString(), eq(String.class), eq(accountId)))
+        String maKhang = "KH_HANOI";
+        when(validationQueryRepository.findMaDviqlyByAccount(maKhang))
                 .thenReturn("PD0100");
 
         ValidationResult result = new ValidationResult();
 
         // When
-        rule.check(accountId, "2026_08", 1, result);
+        rule.check(maKhang, "2026_08", 1, result);
 
         // Then
         assertTrue(result.isValid());
         // Verify that no select from chi_so_dien_nang was run
-        verify(jdbcTemplate, never()).queryForList(contains("chi_so_dien_nang"), any(), any(), any());
+        verify(validationQueryRepository, never()).findNonReplacedReadings(anyString(), anyString(), anyInt());
     }
 
     @Test
     public void testCheckNpcViolation() {
         // Given an NPC customer (PA1100 -> PA)
-        String accountId = "KH_NPC";
-        when(jdbcTemplate.queryForObject(anyString(), eq(String.class), eq(accountId)))
+        String maKhang = "KH_NPC";
+        when(validationQueryRepository.findMaDviqlyByAccount(maKhang))
                 .thenReturn("PA1100");
 
         List<Map<String, Object>> mockReadings = new ArrayList<>();
@@ -57,13 +57,13 @@ public class NpcDecimalTruncationRuleTest {
         r1.put("ma_cto", "CTO-01");
         mockReadings.add(r1);
 
-        when(jdbcTemplate.queryForList(anyString(), eq(accountId), eq("2026_08"), eq(1)))
+        when(validationQueryRepository.findNonReplacedReadings(maKhang, "2026_08", 1))
                 .thenReturn(mockReadings);
 
         ValidationResult result = new ValidationResult();
 
         // When
-        rule.check(accountId, "2026_08", 1, result);
+        rule.check(maKhang, "2026_08", 1, result);
 
         // Then
         assertFalse(result.isValid());
@@ -74,8 +74,8 @@ public class NpcDecimalTruncationRuleTest {
     @Test
     public void testNpcNoViolation() {
         // Given an NPC customer (PA1100 -> PA)
-        String accountId = "KH_NPC_OK";
-        when(jdbcTemplate.queryForObject(anyString(), eq(String.class), eq(accountId)))
+        String maKhang = "KH_NPC_OK";
+        when(validationQueryRepository.findMaDviqlyByAccount(maKhang))
                 .thenReturn("PA1100");
 
         List<Map<String, Object>> mockReadings = new ArrayList<>();
@@ -86,13 +86,13 @@ public class NpcDecimalTruncationRuleTest {
         r1.put("ma_cto", "CTO-01");
         mockReadings.add(r1);
 
-        when(jdbcTemplate.queryForList(anyString(), eq(accountId), eq("2026_08"), eq(1)))
+        when(validationQueryRepository.findNonReplacedReadings(maKhang, "2026_08", 1))
                 .thenReturn(mockReadings);
 
         ValidationResult result = new ValidationResult();
 
         // When
-        rule.check(accountId, "2026_08", 1, result);
+        rule.check(maKhang, "2026_08", 1, result);
 
         // Then
         assertTrue(result.isValid());
@@ -118,7 +118,7 @@ public class NpcDecimalTruncationRuleTest {
         rule.check("KH_HANOI", "2026_08", 1, config, usages, result);
 
         assertTrue(result.isValid());
-        verify(jdbcTemplate, never()).queryForList(anyString(), any(), any(), any());
+        verify(validationQueryRepository, never()).findNonReplacedReadings(anyString(), anyString(), anyInt());
     }
 
     @Test
@@ -143,6 +143,6 @@ public class NpcDecimalTruncationRuleTest {
         assertFalse(result.isValid());
         assertEquals(1, result.getErrors().size());
         assertTrue(result.getErrors().get(0).contains("ERR_NPC_DECIMAL_VIOLATION"));
-        verify(jdbcTemplate, never()).queryForList(anyString(), any(), any(), any());
+        verify(validationQueryRepository, never()).findNonReplacedReadings(anyString(), anyString(), anyInt());
     }
 }

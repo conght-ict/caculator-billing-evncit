@@ -30,7 +30,7 @@ public class BillInvoice {
     @Column(name = "ma_khang", length = 50, nullable = false)
     private String maKhang;
 
-    @Column(name = "ma_sogcs", length = 50, nullable = false)
+    @Column(name = "dtuong_qly", length = 50, nullable = false)
     private String dtuongQly;
 
     @Column(name = "ky_chot", nullable = false)

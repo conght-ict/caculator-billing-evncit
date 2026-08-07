@@ -198,7 +198,7 @@ public class CmisMeterSwapListener {
     }
 
     private void executeSnapshotRefresh(String maKhang, String month, Integer period) {
-        String snapshotGenUrl = "http://localhost:8082/api/v1/snapshots/generate-for-account?accountId=" + maKhang 
+        String snapshotGenUrl = "http://localhost:8082/api/v1/snapshots/generate-for-account?maKhang=" + maKhang 
                 + "&month=" + month + "&period=" + period + "&ruleId=R-02&bangNguon=diem_do&truongThayDoi=thong_tin_cto";
         try {
             restTemplate.postForEntity(snapshotGenUrl, null, String.class);

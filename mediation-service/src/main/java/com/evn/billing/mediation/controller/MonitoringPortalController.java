@@ -6,6 +6,7 @@ import com.evn.billing.common.domain.BillingAccountSnapshot;
 import com.evn.billing.common.domain.MeterUsage;
 import com.evn.billing.common.dto.*;
 import com.evn.billing.mediation.service.MonitoringService;
+import com.evn.billing.mediation.service.BatchService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
@@ -17,13 +18,15 @@ import java.util.Map;
 
 @RestController
 @RequestMapping("/api/v1/monitoring")
-@CrossOrigin(origins = "*")
 public class MonitoringPortalController {
 
     @Autowired
     private MonitoringService monitoringService;
 
-    @Value("${billing.worker.url:http://localhost:8081}")
+    @Autowired
+    private BatchService batchService;
+
+    @Value("${billing.worker.url:http://localhost:8081/worker}")
     private String billingWorkerUrl;
 
     @Value("${batch.orchestrator.url:http://localhost:8083}")
@@ -34,6 +37,11 @@ public class MonitoringPortalController {
     @GetMapping("/accounts")
     public List<Account> getAccounts() {
         return monitoringService.getTopAccounts();
+    }
+
+    @GetMapping("/books")
+    public ResponseEntity<?> getBooks() {
+        return ResponseEntity.ok(monitoringService.getBooks());
     }
 
     @PostMapping("/accounts-with-status")
@@ -123,10 +131,22 @@ public class MonitoringPortalController {
 
     @PostMapping("/batch/run")
     public ResponseEntity<String> runBatchJob(@RequestBody BatchRunRequest request) {
+        String dtuongQly = request.getDtuongQly();
+        String month = request.getThangChuKy();
+        int period = request.getKyChot() != null ? request.getKyChot() : 1;
+        long version = request.getPhienBan() != null ? request.getPhienBan() : 1L;
+
+        if (batchService.isBookAlreadyCompleted(dtuongQly, month, period)) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body("Sổ đã được tính cước thành công cho kỳ này. Vui lòng hủy lịch sử tính cước cũ của Sổ trước khi chạy lại.");
+        }
+
         try {
-            return restTemplate.postForEntity(batchOrchestratorUrl + "/api/v1/batch/run", request, String.class);
+            org.springframework.batch.core.JobExecution execution = batchService.launchBillingJob(dtuongQly, month, period, version);
+            return ResponseEntity.ok("Batch job initiated via Mediation Service. Execution ID: " + execution.getId() + ", Status: " + execution.getStatus());
         } catch (Exception e) {
-            return ResponseEntity.status(500).body("Failed to call batch-orchestrator: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Failed to launch batch job: " + e.getMessage());
         }
     }
 
@@ -168,10 +188,15 @@ public class MonitoringPortalController {
 
     @PostMapping("/batch/validate")
     public ResponseEntity<String> validateBatchJob(@RequestBody BatchValidateRequest request) {
+        String dtuongQly = request.getDtuongQly();
+        String month = request.getThangChuKy();
+        int period = request.getKyChot() != null ? request.getKyChot() : 1;
+
         try {
-            return restTemplate.postForEntity(batchOrchestratorUrl + "/api/v1/batch/validate", request, String.class);
+            String result = batchService.validateBatch(dtuongQly, month, period);
+            return ResponseEntity.ok(result);
         } catch (Exception e) {
-            return ResponseEntity.status(500).body("Failed to call batch-orchestrator validation: " + e.getMessage());
+            return ResponseEntity.status(500).body("Failed to validate batch job: " + e.getMessage());
         }
     }
 
@@ -201,7 +226,7 @@ public class MonitoringPortalController {
     public ResponseEntity<String> performBillingOperation(@RequestBody BillingOperationRequest request) {
         if ((request.getMaKhang() == null || request.getMaKhang().isEmpty()) 
                 && (request.getDtuongQly() == null || request.getDtuongQly().isEmpty())) {
-            return ResponseEntity.badRequest().body("Either accountId or dtuongQly must be provided.");
+            return ResponseEntity.badRequest().body("Either maKhang or dtuongQly must be provided.");
         }
         try {
             monitoringService.sendBillingOperationEvent(

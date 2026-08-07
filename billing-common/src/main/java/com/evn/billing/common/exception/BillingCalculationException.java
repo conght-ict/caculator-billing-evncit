@@ -1,23 +1,23 @@
 package com.evn.billing.common.exception;
 
 public class BillingCalculationException extends RuntimeException {
-    private final String accountId;
+    private final String maKhang;
     private final String errorCode;
 
-    public BillingCalculationException(String accountId, String errorCode, String message) {
+    public BillingCalculationException(String maKhang, String errorCode, String message) {
         super(message);
-        this.accountId = accountId;
+        this.maKhang = maKhang;
         this.errorCode = errorCode;
     }
 
-    public BillingCalculationException(String accountId, String errorCode, String message, Throwable cause) {
+    public BillingCalculationException(String maKhang, String errorCode, String message, Throwable cause) {
         super(message, cause);
-        this.accountId = accountId;
+        this.maKhang = maKhang;
         this.errorCode = errorCode;
     }
 
     public String getAccountId() {
-        return accountId;
+        return maKhang;
     }
 
     public String getErrorCode() {

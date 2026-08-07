@@ -13,7 +13,7 @@ public class RetryTaskDto implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private String originalTaskId;
-    private String accountId;
+    private String maKhang;
     private String billingCycleMonth;
     private int period;
     private int retryCount;

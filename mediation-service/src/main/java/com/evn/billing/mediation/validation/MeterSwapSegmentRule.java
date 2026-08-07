@@ -17,17 +17,17 @@ public class MeterSwapSegmentRule implements ValidationRule {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
-    public void check(String accountId, String month, int period, ValidationResult result) {
-        List<Map<String, Object>> meterPoints = validationQueryRepository.findActiveMeterPointsByAccount(accountId);
+    public void check(String maKhang, String month, int period, ValidationResult result) {
+        List<Map<String, Object>> meterPoints = validationQueryRepository.findActiveMeterPointsByAccount(maKhang);
 
         Date denNgay = null;
         try {
-            denNgay = validationQueryRepository.findDenNgayByDdoSchedule(accountId, month, period);
+            denNgay = validationQueryRepository.findDenNgayByDdoSchedule(maKhang, month, period);
         } catch (Exception e) {
             try {
-                denNgay = validationQueryRepository.findDenNgayByDqlySchedule(accountId, month, period);
+                denNgay = validationQueryRepository.findDenNgayByDqlySchedule(maKhang, month, period);
             } catch (Exception ex) {
-                throw new IllegalStateException("Billing cycle end date (den_ngay) is missing and cannot be resolved for account: " + accountId);
+                throw new IllegalStateException("Billing cycle end date (den_ngay) is missing and cannot be resolved for account: " + maKhang);
             }
         }
         
@@ -80,9 +80,9 @@ public class MeterSwapSegmentRule implements ValidationRule {
     }
 
     @Override
-    public void check(String accountId, String month, int period, com.evn.billing.common.dto.BillingConfigSnapshot config, List<com.evn.billing.common.domain.MeterUsage> usages, ValidationResult result) {
+    public void check(String maKhang, String month, int period, com.evn.billing.common.dto.BillingConfigSnapshot config, List<com.evn.billing.common.domain.MeterUsage> usages, ValidationResult result) {
         if (config == null) {
-            check(accountId, month, period, result);
+            check(maKhang, month, period, result);
             return;
         }
 

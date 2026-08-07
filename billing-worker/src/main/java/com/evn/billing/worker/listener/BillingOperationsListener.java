@@ -29,7 +29,7 @@ public class BillingOperationsListener {
         try {
             Map<String, Object> event = objectMapper.readValue(message, Map.class);
             String op = (String) event.get("operationType");
-            String accountId = (String) event.get("accountId");
+            String maKhang = (String) event.get("maKhang");
             String dtuongQly = (String) event.get("dtuongQly");
             String month = (String) event.get("billingCycleMonth");
             int period = ((Number) event.get("period")).intValue();
@@ -42,14 +42,14 @@ public class BillingOperationsListener {
                 billingService.approveBookBilling(dtuongQly, month, period, excludedAccounts);
                 log.info("[OPERATIONS-KAFKA] Successfully approved calculated billing for Book: {} excluding {}", dtuongQly, excludedAccounts);
             } else if ("LOCK_CMIS".equalsIgnoreCase(op)) {
-                billingService.lockBilling(accountId, month, period, "SUCCESS_CMIS");
-                log.info("[OPERATIONS-KAFKA] Successfully approved calculated billing anomaly for account: {}", accountId);
+                billingService.lockBilling(maKhang, month, period, "SUCCESS_CMIS");
+                log.info("[OPERATIONS-KAFKA] Successfully approved calculated billing anomaly for account: {}", maKhang);
             } else if ("CANCEL_BILLING".equalsIgnoreCase(op)) {
-                billingService.cancelBilling(accountId, month, period);
-                log.info("[OPERATIONS-KAFKA] Successfully cancelled calculated billing for account: {}", accountId);
+                billingService.cancelBilling(maKhang, month, period);
+                log.info("[OPERATIONS-KAFKA] Successfully cancelled calculated billing for account: {}", maKhang);
             } else if ("ISSUE_E_INVOICE".equalsIgnoreCase(op)) {
-                billingService.lockBilling(accountId, month, period, "E_INVOICE_ISSUED");
-                log.info("[OPERATIONS-KAFKA] Successfully issued E-Invoice and locked account: {}", accountId);
+                billingService.lockBilling(maKhang, month, period, "E_INVOICE_ISSUED");
+                log.info("[OPERATIONS-KAFKA] Successfully issued E-Invoice and locked account: {}", maKhang);
             } else {
                 log.warn("[OPERATIONS-KAFKA] Unknown operation type: {}", op);
             }

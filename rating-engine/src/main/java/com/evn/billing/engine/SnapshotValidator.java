@@ -7,7 +7,7 @@ public class SnapshotValidator {
 
     /**
      * Validates that the static snapshot data is complete and well-formed.
-     * Checks 6 required fields: accountId, dtuongQly, normsFactor, effectiveSyncDate, meterTopology, tariffs.
+     * Checks 6 required fields: maKhang, dtuongQly, normsFactor, effectiveSyncDate, meterTopology, tariffs.
      * 
      * @param snapshot The snapshot config to validate
      * @throws MalformSnapshotException if validation fails

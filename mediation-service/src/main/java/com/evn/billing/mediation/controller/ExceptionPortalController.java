@@ -38,21 +38,6 @@ public class ExceptionPortalController {
         return ResponseEntity.ok().build();
     }
 
-    @PostMapping("/batch/validate")
-    public ResponseEntity<Map<String, Object>> isBookReadyForBilling(@RequestBody BatchValidateRequest request) {
-        String dtuongQly = request.getDtuongQly();
-        String month = request.getThangChuKy();
-        Integer period = request.getKyChot() != null ? request.getKyChot() : 1;
-        
-        boolean ready = exceptionPortalService.isBookReadyForBilling(dtuongQly, month, period);
-        return ResponseEntity.ok(Map.of(
-                "dtuongQly", dtuongQly,
-                "month", month,
-                "period", period,
-                "ready", ready,
-                "status", ready ? "READY_FOR_BILLING" : "SUSPENDED"
-        ));
-    }
 
     @lombok.Data
     public static class ResolveRequest {

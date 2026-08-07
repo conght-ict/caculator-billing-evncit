@@ -26,7 +26,7 @@ public class BillingLogService {
     public static class CalculationLogEntry {
         public UUID logId;
         public String dtuongQly;
-        public String accountId;
+        public String maKhang;
         public String billingCycleMonth;
         public int period;
         public String status;
@@ -35,10 +35,10 @@ public class BillingLogService {
         public String errorMessage;
         public java.sql.Timestamp createdAt;
 
-        public CalculationLogEntry(String dtuongQly, String accountId, String billingCycleMonth, int period, String status, String inputData, String outputData, String errorMessage) {
+        public CalculationLogEntry(String dtuongQly, String maKhang, String billingCycleMonth, int period, String status, String inputData, String outputData, String errorMessage) {
             this.logId = UUID.randomUUID();
             this.dtuongQly = dtuongQly;
-            this.accountId = accountId;
+            this.maKhang = maKhang;
             this.billingCycleMonth = billingCycleMonth;
             this.period = period;
             this.status = status;
@@ -49,8 +49,8 @@ public class BillingLogService {
         }
     }
 
-    public void enqueueLog(String dtuongQly, String accountId, String billingCycleMonth, int period, String status, String inputData, String outputData, String errorMessage) {
-        logQueue.offer(new CalculationLogEntry(dtuongQly, accountId, billingCycleMonth, period, status, inputData, outputData, errorMessage));
+    public void enqueueLog(String dtuongQly, String maKhang, String billingCycleMonth, int period, String status, String inputData, String outputData, String errorMessage) {
+        logQueue.offer(new CalculationLogEntry(dtuongQly, maKhang, billingCycleMonth, period, status, inputData, outputData, errorMessage));
     }
 
     @Scheduled(fixedDelay = 200)

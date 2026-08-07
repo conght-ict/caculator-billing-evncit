@@ -16,8 +16,8 @@ public class NpcDecimalTruncationRule implements ValidationRule {
     private ValidationQueryRepository validationQueryRepository;
 
     @Override
-    public void check(String accountId, String month, int period, ValidationResult result) {
-        String maDviqly = validationQueryRepository.findMaDviqlyByAccount(accountId);
+    public void check(String maKhang, String month, int period, ValidationResult result) {
+        String maDviqly = validationQueryRepository.findMaDviqlyByAccount(maKhang);
         if (maDviqly == null) {
             return;
         }
@@ -26,7 +26,7 @@ public class NpcDecimalTruncationRule implements ValidationRule {
             return; // Bỏ qua nếu không phải đơn vị thuộc EVN NPC (mã TCT đại diện là 'PA')
         }
 
-        List<Map<String, Object>> readings = validationQueryRepository.findNonReplacedReadings(accountId, month, period);
+        List<Map<String, Object>> readings = validationQueryRepository.findNonReplacedReadings(maKhang, month, period);
         for (Map<String, Object> r : readings) {
             String bcs = (String) r.get("tgian_bdien");
             if (bcs != null && (bcs.equals("KT") || bcs.equals("BT") || bcs.equals("CD") || bcs.equals("TD"))) {
@@ -40,9 +40,9 @@ public class NpcDecimalTruncationRule implements ValidationRule {
     }
 
     @Override
-    public void check(String accountId, String month, int period, com.evn.billing.common.dto.BillingConfigSnapshot config, List<com.evn.billing.common.domain.MeterUsage> usages, ValidationResult result) {
+    public void check(String maKhang, String month, int period, com.evn.billing.common.dto.BillingConfigSnapshot config, List<com.evn.billing.common.domain.MeterUsage> usages, ValidationResult result) {
         if (config == null) {
-            check(accountId, month, period, result);
+            check(maKhang, month, period, result);
             return;
         }
 
@@ -61,7 +61,7 @@ public class NpcDecimalTruncationRule implements ValidationRule {
         }
 
         for (com.evn.billing.common.domain.MeterUsage u : usages) {
-            if (accountId.equals(u.getMaKhang()) && month.equals(u.getThangChuKy()) && period == u.getKyChot() && !"REPLACED".equals(u.getTrangThaiXuLy())) {
+            if (maKhang.equals(u.getMaKhang()) && month.equals(u.getThangChuKy()) && period == u.getKyChot() && !"REPLACED".equals(u.getTrangThaiXuLy())) {
                 String bcs = u.getTgianBdien();
                 if (bcs != null && (bcs.equals("KT") || bcs.equals("BT") || bcs.equals("CD") || bcs.equals("TD"))) {
                     BigDecimal index = u.getChiSoCuoi();

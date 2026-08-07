@@ -30,14 +30,14 @@ public class CacheAsideSnapshotService {
      * Fetch the frozen snapshot configuration with Redis Cache-Aside and Circuit Breaker protection.
      */
     @CircuitBreaker(name = "redisCircuitBreaker", fallbackMethod = "fallbackGetSnapshot")
-    public BillingConfigSnapshot getSnapshot(String accountId, String month, int period, int version) {
-        String key = REDIS_PREFIX + accountId + ":" + month + ":" + period + ":v" + version;
+    public BillingConfigSnapshot getSnapshot(String maKhang, String month, int period, int version) {
+        String key = REDIS_PREFIX + maKhang + ":" + month + ":" + period + ":v" + version;
         
         // 1. Try fetching from Redis Cache
         try {
             Object cached = redisTemplate.opsForValue().get(key);
             if (cached != null) {
-                log.debug("[CACHE-HIT] Loaded snapshot configuration from Redis for Account: {}", accountId);
+                log.debug("[CACHE-HIT] Loaded snapshot configuration from Redis for Account: {}", maKhang);
                 if (cached instanceof String) {
                     return objectMapper.readValue((String) cached, BillingConfigSnapshot.class);
                 } else {
@@ -50,8 +50,8 @@ public class CacheAsideSnapshotService {
         }
 
         // 2. Cache-Miss: Load from database
-        log.info("[CACHE-MISS] Loading snapshot from Database for Account: {}, Month: {}, Period: {}", accountId, month, period);
-        BillingConfigSnapshot config = loadFromDb(accountId, month, period, version);
+        log.info("[CACHE-MISS] Loading snapshot from Database for Account: {}, Month: {}, Period: {}", maKhang, month, period);
+        BillingConfigSnapshot config = loadFromDb(maKhang, month, period, version);
 
         if (config != null) {
             // 3. Populate Redis Cache
@@ -70,14 +70,14 @@ public class CacheAsideSnapshotService {
     /**
      * Fallback method triggered when Redis service is offline or throws errors.
      */
-    public BillingConfigSnapshot fallbackGetSnapshot(String accountId, String month, int period, int version, Throwable t) {
-        log.warn("[FALLBACK-ACTIVE] Redis Circuit Breaker open. Fallback to Database for Account: {}. Error: {}", accountId, t.getMessage());
-        return loadFromDb(accountId, month, period, version);
+    public BillingConfigSnapshot fallbackGetSnapshot(String maKhang, String month, int period, int version, Throwable t) {
+        log.warn("[FALLBACK-ACTIVE] Redis Circuit Breaker open. Fallback to Database for Account: {}. Error: {}", maKhang, t.getMessage());
+        return loadFromDb(maKhang, month, period, version);
     }
 
-    private BillingConfigSnapshot loadFromDb(String accountId, String month, int period, int version) {
+    private BillingConfigSnapshot loadFromDb(String maKhang, String month, int period, int version) {
         try {
-            String json = billingAccountSnapshotRepository.findSnapshotJson(accountId, month, period, version);
+            String json = billingAccountSnapshotRepository.findSnapshotJson(maKhang, month, period, version);
             if (json != null) {
                 return objectMapper.readValue(json, BillingConfigSnapshot.class);
             }

@@ -17,6 +17,19 @@ public class MonitoringQueryRepositoryImpl implements MonitoringQueryRepository 
     private JdbcTemplate jdbcTemplate;
 
     @Override
+    public List<Map<String, Object>> findBooks() {
+        String sql = "SELECT d.dtuong_qly AS \"bookId\", " +
+                "COUNT(DISTINCT d.ma_khang) AS \"totalAccounts\", " +
+                "MAX(l.thang_ck) AS \"latestMonth\", " +
+                "MAX(l.ky_chot) AS \"latestPeriod\" " +
+                "FROM diem_do d " +
+                "LEFT JOIN lich_ghi_dqly l ON l.dtuong_qly = d.dtuong_qly " +
+                "GROUP BY d.dtuong_qly " +
+                "ORDER BY d.dtuong_qly";
+        return jdbcTemplate.queryForList(sql);
+    }
+
+    @Override
     public void initPendingStatuses(String month, int period, String dtuongQly) {
         String initSql = "INSERT INTO trang_thai_tinh_toan_kh (ma_khang, thang_chu_ky, dtuong_qly, ky_chot, trang_thai, updated_at) " +
                 "SELECT DISTINCT d.ma_khang, ?, d.dtuong_qly, ?, 'PENDING', NOW() " +
@@ -29,7 +42,7 @@ public class MonitoringQueryRepositoryImpl implements MonitoringQueryRepository 
 
     @Override
     public List<Map<String, Object>> findAccountsWithStatus(String month, int period, String dtuongQly) {
-        String selectSql = "SELECT DISTINCT k.ma_khang AS \"accountId\", k.ten_khang AS \"customerName\", " +
+        String selectSql = "SELECT DISTINCT k.ma_khang AS \"maKhang\", k.ten_khang AS \"customerName\", " +
                 "COALESCE(t.trang_thai, 'PENDING') AS \"status\", " +
                 "t.thong_bao_loi AS \"errorMessage\", t.id_hoa_don AS \"invoiceId\", t.updated_at AS \"updatedAt\" " +
                 "FROM khach_hang k " +
@@ -41,7 +54,7 @@ public class MonitoringQueryRepositoryImpl implements MonitoringQueryRepository 
     }
 
     @Override
-    public List<Map<String, Object>> findCalculationLogs(String dtuongQly, String accountId, String status, int limit) {
+    public List<Map<String, Object>> findCalculationLogs(String dtuongQly, String maKhang, String status, int limit) {
         StringBuilder query = new StringBuilder(
                 "SELECT id_log AS log_id, dtuong_qly AS dtuong_qly, ma_khang AS account_id, thang_chu_ky AS billing_cycle_month, trang_thai AS status, thong_bao_loi AS error_message, created_at FROM nhat_ky_tinh_toan WHERE 1=1 ");
         List<Object> args = new ArrayList<>();
@@ -50,9 +63,9 @@ public class MonitoringQueryRepositoryImpl implements MonitoringQueryRepository 
             query.append("AND dtuong_qly = ? ");
             args.add(dtuongQly.trim());
         }
-        if (accountId != null && !accountId.trim().isEmpty()) {
+        if (maKhang != null && !maKhang.trim().isEmpty()) {
             query.append("AND ma_khang = ? ");
-            args.add(accountId.trim());
+            args.add(maKhang.trim());
         }
         if (status != null && !status.trim().isEmpty()) {
             query.append("AND trang_thai = ? ");
@@ -78,15 +91,15 @@ public class MonitoringQueryRepositoryImpl implements MonitoringQueryRepository 
     }
 
     @Override
-    public List<Map<String, Object>> findErrorLogs(String accountId, String month, Integer period, int limit) {
+    public List<Map<String, Object>> findErrorLogs(String maKhang, String month, Integer period, int limit) {
         StringBuilder query = new StringBuilder(
-                "SELECT id_loi AS error_id, ma_khang AS account_id, thang_chu_ky AS billing_cycle_month, ky_chot AS period, tin_nhan_loi AS error_message, stack_trace, created_at " +
+                "SELECT id_nhat_ky AS error_id, ma_khang AS account_id, thang_chu_ky AS billing_cycle_month, ky_chot AS period, loai_loi AS error_type, chi_tiet_loi AS error_message, '' AS stack_trace, created_at " +
                 "FROM nhat_ky_loi_tinh_toan WHERE 1=1 ");
         List<Object> args = new ArrayList<>();
 
-        if (accountId != null && !accountId.trim().isEmpty()) {
+        if (maKhang != null && !maKhang.trim().isEmpty()) {
             query.append("AND ma_khang = ? ");
-            args.add(accountId.trim());
+            args.add(maKhang.trim());
         }
         if (month != null && !month.trim().isEmpty()) {
             query.append("AND thang_chu_ky = ? ");
@@ -152,10 +165,10 @@ public class MonitoringQueryRepositoryImpl implements MonitoringQueryRepository 
     }
 
     @Override
-    public String findBookByAccountId(String accountId) {
+    public String findBookByAccountId(String maKhang) {
         try {
             return jdbcTemplate.queryForObject(
-                    "SELECT dtuong_qly FROM diem_do WHERE ma_khang = ? LIMIT 1", String.class, accountId);
+                    "SELECT dtuong_qly FROM diem_do WHERE ma_khang = ? LIMIT 1", String.class, maKhang);
         } catch (Exception e) {
             return null;
         }

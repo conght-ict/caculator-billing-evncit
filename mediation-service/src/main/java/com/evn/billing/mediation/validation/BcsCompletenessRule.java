@@ -17,23 +17,23 @@ public class BcsCompletenessRule implements ValidationRule {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
-    public void check(String accountId, String month, int period, ValidationResult result) {
-        List<Map<String, Object>> meterPoints = validationQueryRepository.findActiveMeterPointsByAccount(accountId);
+    public void check(String maKhang, String month, int period, ValidationResult result) {
+        List<Map<String, Object>> meterPoints = validationQueryRepository.findActiveMeterPointsByAccount(maKhang);
 
         Date denNgay = null;
         try {
-            denNgay = validationQueryRepository.findDenNgayByDdoSchedule(accountId, month, period);
+            denNgay = validationQueryRepository.findDenNgayByDdoSchedule(maKhang, month, period);
         } catch (Exception e) {
             try {
-                denNgay = validationQueryRepository.findDenNgayByDqlySchedule(accountId, month, period);
+                denNgay = validationQueryRepository.findDenNgayByDqlySchedule(maKhang, month, period);
             } catch (Exception ex) {
-                throw new IllegalStateException("Billing cycle end date (den_ngay) is missing and cannot be resolved for account: " + accountId);
+                throw new IllegalStateException("Billing cycle end date (den_ngay) is missing and cannot be resolved for account: " + maKhang);
             }
         }
         
         java.time.LocalDate targetDate = ((java.sql.Date) denNgay).toLocalDate();
 
-        List<Map<String, Object>> received = validationQueryRepository.findValidatedReadings(accountId, month, period);
+        List<Map<String, Object>> received = validationQueryRepository.findValidatedReadings(maKhang, month, period);
 
         Set<String> receivedKeys = new HashSet<>();
         for (Map<String, Object> r : received) {
@@ -109,9 +109,9 @@ public class BcsCompletenessRule implements ValidationRule {
     }
 
     @Override
-    public void check(String accountId, String month, int period, com.evn.billing.common.dto.BillingConfigSnapshot config, List<com.evn.billing.common.domain.MeterUsage> usages, ValidationResult result) {
+    public void check(String maKhang, String month, int period, com.evn.billing.common.dto.BillingConfigSnapshot config, List<com.evn.billing.common.domain.MeterUsage> usages, ValidationResult result) {
         if (config == null) {
-            check(accountId, month, period, result);
+            check(maKhang, month, period, result);
             return;
         }
 
@@ -123,7 +123,7 @@ public class BcsCompletenessRule implements ValidationRule {
         Set<String> receivedKeys = new HashSet<>();
         if (usages != null) {
             for (com.evn.billing.common.domain.MeterUsage u : usages) {
-                if (accountId.equals(u.getMaKhang()) && month.equals(u.getThangChuKy()) && period == u.getKyChot() && "VALIDATED".equals(u.getTrangThaiXuLy())) {
+                if (maKhang.equals(u.getMaKhang()) && month.equals(u.getThangChuKy()) && period == u.getKyChot() && "VALIDATED".equals(u.getTrangThaiXuLy())) {
                     String mId = u.getMaDdo();
                     String bcs = u.getTgianBdien();
                     String maCto = u.getMaCto();

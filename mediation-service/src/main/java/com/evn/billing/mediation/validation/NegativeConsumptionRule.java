@@ -16,8 +16,8 @@ public class NegativeConsumptionRule implements ValidationRule {
     private ValidationQueryRepository validationQueryRepository;
 
     @Override
-    public void check(String accountId, String month, int period, ValidationResult result) {
-        List<Map<String, Object>> list = validationQueryRepository.findNonReplacedReadings(accountId, month, period);
+    public void check(String maKhang, String month, int period, ValidationResult result) {
+        List<Map<String, Object>> list = validationQueryRepository.findNonReplacedReadings(maKhang, month, period);
         for (Map<String, Object> r : list) {
             BigDecimal consumption = (BigDecimal) r.get("san_luong_tho");
             if (consumption != null && consumption.compareTo(BigDecimal.ZERO) < 0) {
@@ -28,9 +28,9 @@ public class NegativeConsumptionRule implements ValidationRule {
     }
 
     @Override
-    public void check(String accountId, String month, int period, com.evn.billing.common.dto.BillingConfigSnapshot config, List<com.evn.billing.common.domain.MeterUsage> usages, ValidationResult result) {
+    public void check(String maKhang, String month, int period, com.evn.billing.common.dto.BillingConfigSnapshot config, List<com.evn.billing.common.domain.MeterUsage> usages, ValidationResult result) {
         if (config == null) {
-            check(accountId, month, period, result);
+            check(maKhang, month, period, result);
             return;
         }
 
@@ -39,7 +39,7 @@ public class NegativeConsumptionRule implements ValidationRule {
         }
 
         for (com.evn.billing.common.domain.MeterUsage u : usages) {
-            if (accountId.equals(u.getMaKhang()) && month.equals(u.getThangChuKy()) && period == u.getKyChot() && !"REPLACED".equals(u.getTrangThaiXuLy())) {
+            if (maKhang.equals(u.getMaKhang()) && month.equals(u.getThangChuKy()) && period == u.getKyChot() && !"REPLACED".equals(u.getTrangThaiXuLy())) {
                 BigDecimal consumption = u.getConsumption();
                 if (consumption != null && consumption.compareTo(BigDecimal.ZERO) < 0) {
                     result.addError(String.format("ERR_NEGATIVE_CONSUMPTION: Meter point %s, register %s, meter %s has negative consumption: %s",

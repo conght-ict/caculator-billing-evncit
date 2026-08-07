@@ -57,8 +57,27 @@ public class BillingBatchConfig {
             @Value("#{jobParameters['month']}") String month,
             @Value("#{jobParameters['period']}") Long period) {
         
+        org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(BillingBatchConfig.class);
+        log.info("Initializing accountReader with dtuongQly: {}, month: {}, period: {}, entityManagerFactory: {}", 
+                 dtuongQly, month, period, entityManagerFactory);
+                 
+        if (entityManagerFactory == null) {
+            throw new IllegalStateException("entityManagerFactory is null in BillingBatchConfig!");
+        }
+        if (dtuongQly == null) {
+            throw new IllegalArgumentException("jobParameter 'dtuongQly' is null!");
+        }
+        if (month == null) {
+            throw new IllegalArgumentException("jobParameter 'month' is null!");
+        }
+
         int effectivePeriod = period != null ? period.intValue() : 1;
         
+        Map<String, Object> paramValues = new java.util.HashMap<>();
+        paramValues.put("dtuongQly", dtuongQly);
+        paramValues.put("month", month);
+        paramValues.put("period", effectivePeriod);
+
         return new JpaPagingItemReaderBuilder<Account>()
                 .name("accountReader")
                 .entityManagerFactory(entityManagerFactory)
@@ -66,11 +85,7 @@ public class BillingBatchConfig {
                              "AND NOT EXISTS (SELECT abs FROM AccountBillingStatus abs " +
                              "WHERE abs.maKhang = a.maKhang AND abs.thangChuKy = :month " +
                              "AND abs.kyChot = :period AND abs.trangThai IN ('SUCCESS', 'SUCCESS_CMIS'))")
-                .parameterValues(Map.of(
-                        "dtuongQly", dtuongQly,
-                        "month", month,
-                        "period", effectivePeriod
-                ))
+                .parameterValues(paramValues)
                 .pageSize(1000)
                 .build();
     }

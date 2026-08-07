@@ -98,7 +98,7 @@ public class CmisCustomerListener {
                 return;
             }
 
-            String snapshotGenUrl = "http://localhost:8082/api/v1/snapshots/generate-for-account?accountId=" + maKhang 
+            String snapshotGenUrl = "http://localhost:8082/api/v1/snapshots/generate-for-account?maKhang=" + maKhang 
                     + "&month=" + month + "&period=" + period + "&ruleId=" + ruleId + "&bangNguon=" + bangNguon 
                     + "&truongThayDoi=" + truongThayDoi;
             

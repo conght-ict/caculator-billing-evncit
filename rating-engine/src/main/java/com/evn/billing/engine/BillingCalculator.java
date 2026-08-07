@@ -150,7 +150,7 @@ public class BillingCalculator {
                 operands.put("PRO_RATA_FACTOR", proRataFactor);
                 operands.put("TARIFFS", config.getBieuGia());
 
-                if ("STEPPING".equals(tariffRules.getLoaiBieuGia())) {
+                if (tariffRules.isBacThang()) {
                     BillingVariant variant = VariantRegistry.get("STEP_RATING");
                     variant.execute(operands, ratingStep);
                     ruleSteps = (List<RatingStepEngine.StepResult>) operands.get(ratingStep.getOutputOperands().get("breakdown"));

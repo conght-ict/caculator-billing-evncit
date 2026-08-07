@@ -60,9 +60,9 @@ public class SelfHealingService {
         }
     }
 
-    private void logErrorToDb(String accountId, String month, int period, String errorType, String errorDetails) {
+    private void logErrorToDb(String maKhang, String month, int period, String errorType, String errorDetails) {
         try {
-            selfHealingRepository.insertErrorLog(accountId, month, period, errorType, errorDetails);
+            selfHealingRepository.insertErrorLog(maKhang, month, period, errorType, errorDetails);
         } catch (Exception e) {
             log.error("[SELF-HEALING] Failed to log error to DB: {}", e.getMessage());
         }
@@ -102,48 +102,48 @@ public class SelfHealingService {
 
             for (Map<String, Object> t : pendingTasks) {
                 Long taskId = ((Number) t.get("id_nhiem_vu")).longValue();
-                String accountId = (String) t.get("ma_khang");
+                String maKhang = (String) t.get("ma_khang");
                 String month = (String) t.get("thang_chu_ky");
                 int period = ((Number) t.get("ky_chot")).intValue();
                 int retries = ((Number) t.get("so_lan_thu_lai")).intValue();
 
                 // Check if snapshot is malformed -> regenerate if possible
                 // We mock regeneration by updating status and dispatching a new BillingTaskDto
-                log.info("[SELF-HEALING] Re-triggering execution for Account: {}, Month: {}, Period: {}", accountId, month, period);
+                log.info("[SELF-HEALING] Re-triggering execution for Account: {}, Month: {}, Period: {}", maKhang, month, period);
 
                 // Update task status to COMPLETED in DLQ
                 selfHealingRepository.markRetryTaskCompleted(taskId);
 
                 String dtuongQly = null;
                 try {
-                    dtuongQly = selfHealingRepository.findBookFromBillingStatus(accountId, month, period);
+                    dtuongQly = selfHealingRepository.findBookFromBillingStatus(maKhang, month, period);
                 } catch (Exception ex) {
                     try {
-                        dtuongQly = selfHealingRepository.findBookByAccountId(accountId);
+                        dtuongQly = selfHealingRepository.findBookByAccountId(maKhang);
                     } catch (Exception ex2) {
                         // ignore
                     }
                 }
 
                 if (dtuongQly == null) {
-                    log.error("[SELF-HEALING] Cannot resolve dtuongQly (dtuong_qly) for account: {}. Skipping self-healing retry.", accountId);
+                    log.error("[SELF-HEALING] Cannot resolve dtuongQly (dtuong_qly) for account: {}. Skipping self-healing retry.", maKhang);
                     selfHealingRepository.markRetryTaskFailed(taskId, "Missing dtuongQly");
                     continue;
                 }
 
                 // Dispatch task back to Kafka execution queue
                 BillingTaskDto taskDto = new BillingTaskDto();
-                taskDto.setMaKhang(accountId);
+                taskDto.setMaKhang(maKhang);
                 taskDto.setDtuongQly(dtuongQly);
                 taskDto.setThangChuKy(month);
                 taskDto.setKyChot(period);
-                int nextVersion = (int) billInvoiceRepository.countByMaKhangAndThangChuKyAndKyChot(accountId, month, period) + 1;
+                int nextVersion = (int) billInvoiceRepository.countByMaKhangAndThangChuKyAndKyChot(maKhang, month, period) + 1;
                 taskDto.setPhienBanTinh(nextVersion);
                 taskDto.setTriggeredBy("SELF_HEALING");
                 taskDto.setTraceId(java.util.UUID.randomUUID().toString().replace("-", ""));
                 taskDto.setDanhSachChiSo(new ArrayList<>()); // Readings will be re-fetched by worker from DB
 
-                kafkaTemplate.send(EXECUTION_TOPIC, accountId, taskDto);
+                kafkaTemplate.send(EXECUTION_TOPIC, maKhang, taskDto);
             }
         } catch (Exception e) {
             log.error("[SELF-HEALING] Error sweeping DLQ table: {}", e.getMessage(), e);

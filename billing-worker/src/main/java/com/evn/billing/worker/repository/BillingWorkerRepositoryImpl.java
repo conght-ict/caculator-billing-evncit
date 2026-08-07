@@ -24,12 +24,12 @@ public class BillingWorkerRepositoryImpl implements BillingWorkerRepository {
         // 1. Bulk insert Invoices (using raw SQL batch for max performance)
         if (invoices != null && !invoices.isEmpty()) {
             String invoiceSql = "INSERT INTO hoa_don (" +
-                    "id_hoa_don, ma_khang, ma_sogcs, thang_chu_ky, ky_chot, " +
+                    "id_hoa_don, ma_khang, dtuong_qly, thang_chu_ky, ky_chot, " +
                     "tong_tien_truoc_thue, tien_thue, tong_tien_sau_thue, " +
                     "khoa_lap_trung, ban_ke_tinh_toan, ref_snapshot, trang_thai_tinh_toan, " +
                     "ma_dviqly, created_at, updated_at" +
                     ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, 'FINAL', ?, NOW(), NOW()) " +
-                    "ON CONFLICT (khoa_lap_trung) DO NOTHING";
+                    "ON CONFLICT (khoa_lap_trung, thang_chu_ky) DO NOTHING";
 
             jdbcTemplate.batchUpdate(invoiceSql, new org.springframework.jdbc.core.BatchPreparedStatementSetter() {
                 @Override

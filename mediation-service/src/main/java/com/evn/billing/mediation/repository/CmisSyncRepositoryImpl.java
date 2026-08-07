@@ -6,6 +6,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.math.BigDecimal;
 
 @Repository
 public class CmisSyncRepositoryImpl implements CmisSyncRepository {
@@ -76,15 +77,22 @@ public class CmisSyncRepositoryImpl implements CmisSyncRepository {
 
     @Override
     @Transactional
-    public void upsertTariff(String maBieuGia, String tenBieuGia, String loaiBieuGia, String ngayHieuLuc, String ngayHetHan, String quyetDinhPhapLy, String trangThai, String chiTietGiaJson) {
-        String sql = "INSERT INTO bieu_gia (ma_bieu_gia, ten_bieu_gia, loai_bieu_gia, ngay_hieu_luc, ngay_het_han, quyet_dinh_phap_ly, trang_thai, chi_tiet_gia) " +
-                     "VALUES (?, ?, ?, CAST(? AS DATE), CAST(? AS DATE), ?, ?, ?::jsonb) " +
+    public void upsertTariff(String maBieuGia, String tenBieuGia, String loaiBieuGia, String ngayHieuLuc, String ngayHetHan, String quyetDinhPhapLy, String trangThai, String chiTietGiaJson,
+                             String maNhomnn, String khoangDa, String maNgiaCmis, String thoigianBdien, boolean bacThang, BigDecimal donGiaPhang) {
+        String sql = "INSERT INTO bieu_gia (ma_bieu_gia, ten_bieu_gia, loai_bieu_gia, ngay_hieu_luc, ngay_het_han, quyet_dinh_phap_ly, trang_thai, chi_tiet_gia, " +
+                     "ma_nhomnn, khoang_da, ma_ngia_cmis, thoigian_bdien, bac_thang, don_gia_phang) " +
+                     "VALUES (?, ?, ?, CAST(? AS DATE), CAST(? AS DATE), ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?) " +
                      "ON CONFLICT (ma_bieu_gia) DO UPDATE SET " +
                      "ten_bieu_gia = EXCLUDED.ten_bieu_gia, loai_bieu_gia = EXCLUDED.loai_bieu_gia, " +
                      "ngay_hieu_luc = EXCLUDED.ngay_hieu_luc, ngay_het_han = EXCLUDED.ngay_het_han, " +
                      "quyet_dinh_phap_ly = EXCLUDED.quyet_dinh_phap_ly, trang_thai = EXCLUDED.trang_thai, " +
-                     "chi_tiet_gia = EXCLUDED.chi_tiet_gia";
-        jdbcTemplate.update(sql, maBieuGia, tenBieuGia, loaiBieuGia, ngayHieuLuc, ngayHetHan, quyetDinhPhapLy, trangThai, chiTietGiaJson);
+                     "chi_tiet_gia = EXCLUDED.chi_tiet_gia, ma_nhomnn = EXCLUDED.ma_nhomnn, " +
+                     "khoang_da = EXCLUDED.khoang_da, ma_ngia_cmis = EXCLUDED.ma_ngia_cmis, " +
+                     "thoigian_bdien = EXCLUDED.thoigian_bdien, bac_thang = EXCLUDED.bac_thang, " +
+                     "don_gia_phang = EXCLUDED.don_gia_phang";
+
+        jdbcTemplate.update(sql, maBieuGia, tenBieuGia, loaiBieuGia, ngayHieuLuc, ngayHetHan, quyetDinhPhapLy, trangThai, chiTietGiaJson,
+                            maNhomnn, khoangDa, maNgiaCmis, thoigianBdien, bacThang, donGiaPhang);
     }
 
     @Override

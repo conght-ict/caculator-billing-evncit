@@ -37,7 +37,7 @@ public class ExceptionPortalRepositoryImpl implements ExceptionPortalRepository 
         String selectSql = "SELECT * FROM chi_so_dien_nang WHERE id_chi_so = ? AND thang_chu_ky = ?";
         Map<String, Object> oldRecord = jdbcTemplate.queryForMap(selectSql, usageId, month);
 
-        String accountId = (String) oldRecord.get("ma_khang");
+        String maKhang = (String) oldRecord.get("ma_khang");
         String meterPointId = (String) oldRecord.get("ma_ddo");
         int period = ((Number) oldRecord.get("ky_chot")).intValue();
         BigDecimal startIndex = (BigDecimal) oldRecord.get("chi_so_dau");
@@ -64,7 +64,7 @@ public class ExceptionPortalRepositoryImpl implements ExceptionPortalRepository 
         
         jdbcTemplate.update(insertNewSql,
                 oldSubSeq + 1,
-                accountId,
+                maKhang,
                 meterPointId,
                 month,
                 period,
@@ -80,7 +80,7 @@ public class ExceptionPortalRepositoryImpl implements ExceptionPortalRepository 
         // 5. Update customer billing status back to PROCESSING to trigger billing flow
         String updateStatusSql = "UPDATE trang_thai_tinh_toan_kh SET trang_thai = 'PROCESSING', thong_bao_loi = NULL, updated_at = NOW() " +
                 "WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ?";
-        jdbcTemplate.update(updateStatusSql, accountId, month, period);
+        jdbcTemplate.update(updateStatusSql, maKhang, month, period);
     }
 
     @Override

@@ -17,6 +17,8 @@ data:
   KAFKA_SERVERS: "host.docker.internal:9092"
   REDIS_HOST: "host.docker.internal"
   REDIS_PORT: "6379"
+  BILLING_WORKER_URL: "http://billing-worker-service:8081/worker"
+  SNAPSHOT_SERVICE_URL: "http://snapshot-generator-service:8082/snapshot"
   SPRING_PROFILES_ACTIVE: "local"
 ---
 apiVersion: v1

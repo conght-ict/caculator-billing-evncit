@@ -20,6 +20,7 @@ Trước khi thực hiện bất kỳ hành động tìm kiếm hoặc chỉnh s
 *   Nếu tác vụ liên quan đến **Rating / Thuật toán Định giá & Áp biểu giá** (Netting, Stepping, TOU, rating-engine) $\rightarrow$ Bắt buộc đọc [rating-subagent/SKILL.md](file:///e:/caculator-billing-evncit/.agents/skills/rating-subagent/SKILL.md) đầu tiên.
 *   Nếu tác vụ liên quan đến **Worker / Spring Batch & Kafka Worker** (Chunk-processing, Redis Cache-Aside, Bulk Write, Outbox Event, billing-worker, snapshot-generator) $\rightarrow$ Bắt buộc đọc [worker-subagent/SKILL.md](file:///e:/caculator-billing-evncit/.agents/skills/worker-subagent/SKILL.md) đầu tiên.
 *   Nếu tác vụ liên quan đến **Common / Entities & DTOs dùng chung** (JPA mapping, Composite keys, JSONB mapping, Event schemas, billing-common) $\rightarrow$ Bắt buộc đọc [common-subagent/SKILL.md](file:///e:/caculator-billing-evncit/.agents/skills/common-subagent/SKILL.md) đầu tiên.
+*   Nếu tác vụ liên quan đến **Planning / Phân tích Kiến trúc & Lập kế hoạch** (Phân tích thiết kế, thiết kế hệ thống, sơ đồ tuần tự, implementation plan) $\rightarrow$ Bắt buộc đọc [planner-agent/SKILL.md](file:///e:/caculator-billing-evncit/.agents/skills/planner-agent/SKILL.md) đầu tiên.
 
 ---
 
@@ -62,6 +63,20 @@ Dự án được tổ chức theo mô hình Multi-Module Maven và bắt buộc
 
 ## 7. Multi-Agent & LLM Selection Rule (Quy tắc Phối hợp Lực lượng)
 Để tối ưu hóa sức mạnh của các mô hình ngôn ngữ lớn khác nhau trong quá trình pair-programming:
-*   **Phân tích & Lên Kế hoạch (Planning Mode)**: Khi cần thiết kế hệ thống, phân tích nghiệp vụ phức tạp, giải quyết mâu thuẫn kiến trúc hoặc lập kế hoạch triển khai lớn $\rightarrow$ Khuyến khích người dùng chọn **Claude Opus 4.6 (Thinking)**. Sử dụng slash command `/grill-me` để phỏng vấn làm rõ các quyết định thiết kế. Kế hoạch phải được ghi nhận vào `implementation_plan.md` và được phê duyệt trước khi lập trình.
-*   **Lập trình & Chạy Kiểm thử (Execution Mode)**: Khi bắt tay vào viết code, sửa lỗi compile, viết Unit Test, chạy maven test hoặc tối ưu hóa hiệu năng $\rightarrow$ Khuyến khích người dùng chọn **Gemini 3.5 Flash (High)** để có tốc độ phản hồi tức thời (<3s) và khả năng xử lý context lớn.
+*   **Phân tích & Lên Kế hoạch (Planning Mode)**: **Bắt buộc** sử dụng model **Claude Opus** (ví dụ: **Claude Opus 4.6 (Thinking)**) khi phân tích thiết kế, lên kế hoạch triển khai hoặc giải quyết mâu thuẫn kiến trúc. Sử dụng slash command `/grill-me` để làm rõ các quyết định thiết kế. Kế hoạch (plan) chi tiết **bắt buộc phải được ghi nhận thành file markdown vào thư mục `plan/` ở gốc dự án** để các Subagent hoặc Agent lập trình sau đó có thể đọc và thực hiện chính xác, tránh sai lệch nghiệp vụ.
+*   **Lập trình & Chạy Kiểm thử (Execution Mode)**: **Bắt buộc** sử dụng model **Gemini 3.5 Flash** (ví dụ: **Gemini 3.5 Flash (High)**) để viết code, sửa lỗi compile, viết Unit Test, chạy maven test hoặc tối ưu hóa hiệu năng để có tốc độ phản hồi tức thời (<3s) và khả năng xử lý context lớn.
 *   **Xác định Subagent**: Khi bắt đầu một phiên làm việc, Agent hiện tại bắt buộc phải đối chiếu Scope nghiệp vụ với Rule số 2 để đọc tệp `SKILL.md` và xướng danh Subagent tương ứng trước khi tiến hành code.
+
+---
+
+## 8. Quy Tắc Đặt Tên Tiếng Việt (Vietnamese Naming Convention)
+Để thống nhất và tăng tính dễ đọc cho hệ thống Calculator Billing, bắt buộc phải áp dụng quy chuẩn đặt tên tiếng Việt không dấu:
+*   **Tên bảng cơ sở dữ liệu (Database Tables)**: Sử dụng tiếng Việt không dấu, dạng `snake_case` (ví dụ: `khach_hang`, `diem_do`, `bien_ban_ap_gia`).
+*   **Tên cột cơ sở dữ liệu (Database Columns)**: Sử dụng tiếng Việt không dấu, dạng `snake_case` (ví dụ: `ma_khang`, `thang_chu_ky`, `dtuong_qly`).
+*   **Tên trường trong Entity/DTO (Java Fields)**: Sử dụng tiếng Việt không dấu, dạng `camelCase` và bắt buộc phải tương khớp 1:1 với tên cột trong DB (ví dụ: `maKhang`, `thangChuKy`, `dtuongQly`).
+*   **Mix Việt - Anh**: Cho phép đặt tên Class (dạng `PascalCase`) hoặc Method (dạng `camelCase`) theo kiểu mix Việt - Anh nếu từ tiếng Việt thuần quá dài hoặc không diễn tả hết ý nghĩa kỹ thuật (ví dụ: `KhachHangSyncListener`, `calculateHoaDon()`, `validateChiSo()`).
+*   **Kafka Topic / Payload Key**:
+    *   Tên topic dùng dạng `kebab-case` tiếng Việt (ví dụ: `cmis-khach-hang`, `cmis-diem-do`).
+    *   Các key trong JSON payload dùng dạng `snake_case` tiếng Việt khớp với tên cột DB (ví dụ: `ma_khang`, `dtuong_qly`).
+*   **Cấm dùng `@JsonAlias`**: JSON payload giao tiếp qua API hoặc Kafka phải sử dụng thuần túy key tiếng Việt chuẩn, không sử dụng alias sang tiếng Anh.
+*   **Tên biến cục bộ**: Được phép dùng tiếng Anh ngắn gọn nếu phạm vi (scope) hẹp và mang tính kỹ thuật thuần túy (ví dụ: `i`, `idx`, `sql`, `conn`, `result`). Các biến chứa dữ liệu nghiệp vụ bắt buộc dùng tiếng Việt (ví dụ: `tongTien`, `sanLuongTho`).

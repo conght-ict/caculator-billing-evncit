@@ -15,13 +15,13 @@ public class Kh2tpPmaxRule implements ValidationRule {
     private AmrIngestionRepository repository;
 
     @Override
-    public void check(String accountId, String month, int period, ValidationResult result) {
-        List<Map<String, Object>> missingMeters = repository.getKh2tpPmaxStatus(accountId, month, period);
+    public void check(String maKhang, String month, int period, ValidationResult result) {
+        List<Map<String, Object>> missingMeters = repository.getKh2tpPmaxStatus(maKhang, month, period);
         if (!missingMeters.isEmpty()) {
             for (Map<String, Object> meter : missingMeters) {
                 String meterId = (String) meter.get("ma_ddo");
                 if ("STACKING_GROUP".equals(meterId)) {
-                    result.addError("ERR_MISSING_PMAX: Missing Pmax for stacking group of customer: " + accountId);
+                    result.addError("ERR_MISSING_PMAX: Missing Pmax for stacking group of customer: " + maKhang);
                 } else {
                     result.addError("ERR_MISSING_PMAX: Meter point " + meterId + " is missing Pmax reading.");
                 }
