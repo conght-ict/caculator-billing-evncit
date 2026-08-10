@@ -211,7 +211,20 @@ CREATE OR REPLACE FUNCTION tg_prevent_locked_snapshot_mutation()
 RETURNS TRIGGER AS $$
 BEGIN
     IF (OLD.trang_thai = 'LOCKED') THEN
-        RAISE EXCEPTION 'Cannot modify or delete a LOCKED snapshot (id_snapshot = %). Ensure snapshot is isolation-guaranteed.', OLD.id_snapshot;
+        -- Cho phép cập nhật trạng thái từ LOCKED sang DRAFT hoặc DEPRECATED khi hủy cước (Cancel Billing)
+        -- Miễn là không thay đổi các thông tin cấu hình dữ liệu quan trọng khác
+        IF (NEW.trang_thai IN ('DRAFT', 'DEPRECATED')
+            AND OLD.id_snapshot = NEW.id_snapshot
+            AND OLD.ma_khang = NEW.ma_khang
+            AND OLD.dtuong_qly = NEW.dtuong_qly
+            AND OLD.thang_chu_ky = NEW.thang_chu_ky
+            AND OLD.ky_chot = NEW.ky_chot
+            AND OLD.phien_ban_tinh = NEW.phien_ban_tinh
+            AND OLD.du_lieu_cau_hinh = NEW.du_lieu_cau_hinh) THEN
+            RETURN NEW;
+        ELSE
+            RAISE EXCEPTION 'Cannot modify or delete a LOCKED snapshot (id_snapshot = %). Ensure snapshot is isolation-guaranteed.', OLD.id_snapshot;
+        END IF;
     END IF;
     RETURN NEW;
 END;
@@ -515,3 +528,19 @@ CREATE TABLE nhat_ky_chi_so_2026_07 PARTITION OF nhat_ky_chi_so FOR VALUES IN ('
 CREATE TABLE nhat_ky_chi_so_2026_08 PARTITION OF nhat_ky_chi_so FOR VALUES IN ('2026_08');
 CREATE TABLE nhat_ky_chi_so_default PARTITION OF nhat_ky_chi_so DEFAULT;
 CREATE INDEX idx_nhat_ky_chi_so_lookup ON nhat_ky_chi_so(ma_khang, thang_chu_ky);
+
+-- 15. Nhật Ký Hủy Tính (Lịch sử các phiên hủy cước và audit trace)
+CREATE TABLE nhat_ky_huy_tinh (
+    id              BIGSERIAL PRIMARY KEY,
+    ma_khang        VARCHAR(50)  NOT NULL,
+    thang_chu_ky    VARCHAR(20)  NOT NULL,
+    ky_chot         INT          NOT NULL,
+    trang_thai_cu   VARCHAR(50),
+    nguoi_huy       VARCHAR(100),
+    ly_do_huy       TEXT,
+    thoi_gian_huy   TIMESTAMPTZ  DEFAULT NOW(),
+    nguon_huy       VARCHAR(50)  -- 'KAFKA', 'REST_API', 'CMIS_REJECT', 'CASCADE'
+);
+
+CREATE INDEX idx_nhat_ky_huy_tinh_ma_khang ON nhat_ky_huy_tinh (ma_khang, thang_chu_ky, ky_chot);
+

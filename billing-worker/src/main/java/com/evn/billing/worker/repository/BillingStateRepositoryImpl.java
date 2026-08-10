@@ -5,6 +5,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Propagation;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
@@ -17,6 +19,8 @@ import java.util.stream.Collectors;
 
 @Repository
 public class BillingStateRepositoryImpl implements BillingStateRepository {
+
+    private static final Logger log = LoggerFactory.getLogger(BillingStateRepositoryImpl.class);
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -158,14 +162,15 @@ public class BillingStateRepositoryImpl implements BillingStateRepository {
 
     @Override
     public List<String> findParentAccountIds(String childAccountId) {
-        String sql = "SELECT DISTINCT mp_parent.account_id " +
-                "FROM meter_point mp_child " +
-                "JOIN meter_relation mr ON mp_child.meter_point_id = mr.child_id " +
-                "JOIN meter_point mp_parent ON mr.parent_id = mp_parent.meter_point_id " +
-                "WHERE mp_child.account_id = ?";
+        String sql = "SELECT DISTINCT parent.ma_khang " +
+                "FROM diem_do child " +
+                "JOIN quan_he_diem_do qh ON child.ma_ddo = qh.ma_ddo_con " +
+                "JOIN diem_do parent ON qh.ma_ddo_cha = parent.ma_ddo " +
+                "WHERE child.ma_khang = ?";
         try {
             return jdbcTemplate.queryForList(sql, String.class, childAccountId);
         } catch (Exception e) {
+            log.error("[SQL-ERROR] Failed to query parent account IDs for child '{}': {}", childAccountId, e.getMessage());
             return Collections.emptyList();
         }
     }
@@ -194,25 +199,40 @@ public class BillingStateRepositoryImpl implements BillingStateRepository {
 
     @Override
     public void markInvoicesCancelled(String maKhang, String month, int period) {
-        jdbcTemplate.update(
+        int rows = jdbcTemplate.update(
                 "UPDATE hoa_don SET trang_thai_tinh_toan = 'CANCELLED', updated_at = NOW() WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ? AND trang_thai_tinh_toan != 'CANCELLED'",
                 maKhang, month, period
         );
+        log.info("[SQL-CANCEL-INVOICE] Updated {} rows in 'hoa_don' for maKhang={}, month={}, period={}", rows, maKhang, month, period);
     }
 
     @Override
     public void setSnapshotsDraft(String maKhang, String month, int period) {
-        jdbcTemplate.update(
+        int rows = jdbcTemplate.update(
                 "UPDATE snapshot_tinh_toan SET trang_thai = 'DRAFT' WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ?",
                 maKhang, month, period
         );
+        log.info("[SQL-CANCEL-SNAPSHOT] Updated {} rows in 'snapshot_tinh_toan' for maKhang={}, month={}, period={}", rows, maKhang, month, period);
     }
 
     @Override
     public void markAccountCancelled(String maKhang, String month, int period, String message) {
-        jdbcTemplate.update(
+        int rows = jdbcTemplate.update(
                 "UPDATE trang_thai_tinh_toan_kh SET trang_thai = 'CANCELLED', id_hoa_don = NULL, thong_bao_loi = ?, updated_at = NOW() WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ?",
                 message, maKhang, month, period
+        );
+        log.info("[SQL-CANCEL-ACCOUNT] Updated {} rows in 'trang_thai_tinh_toan_kh' for maKhang={}, month={}, period={}", rows, maKhang, month, period);
+    }
+
+    @Override
+    public void insertCancelAuditLog(String maKhang, String month, int period,
+                                      String trangThaiCu, String nguoiHuy,
+                                      String lyDoHuy, String nguonHuy) {
+        jdbcTemplate.update(
+            "INSERT INTO nhat_ky_huy_tinh " +
+            "(ma_khang, thang_chu_ky, ky_chot, trang_thai_cu, nguoi_huy, ly_do_huy, nguon_huy) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            maKhang, month, period, trangThaiCu, nguoiHuy, lyDoHuy, nguonHuy
         );
     }
 
@@ -244,6 +264,13 @@ public class BillingStateRepositoryImpl implements BillingStateRepository {
     public List<String> findLockableAccountsForBook(String dtuongQly, String month, int period) {
         return jdbcTemplate.queryForList(
                 "SELECT ma_khang FROM trang_thai_tinh_toan_kh WHERE dtuong_qly = ? AND thang_chu_ky = ? AND ky_chot = ? AND trang_thai IN ('SUCCESS', 'SUCCESS_CMIS', 'ANOMALY') FOR UPDATE",
+                String.class, dtuongQly, month, period);
+    }
+
+    @Override
+    public List<String> findCancelableAccountsForBook(String dtuongQly, String month, int period) {
+        return jdbcTemplate.queryForList(
+                "SELECT ma_khang FROM trang_thai_tinh_toan_kh WHERE dtuong_qly = ? AND thang_chu_ky = ? AND ky_chot = ? AND trang_thai NOT IN ('LOCKED', 'E_INVOICE_ISSUED', 'CANCELLED') FOR UPDATE",
                 String.class, dtuongQly, month, period);
     }
 
@@ -340,5 +367,30 @@ public class BillingStateRepositoryImpl implements BillingStateRepository {
                 "SELECT ma_khang FROM trang_thai_tinh_toan_kh WHERE dtuong_qly = ? AND thang_chu_ky = ? AND ky_chot = ? AND trang_thai = 'APPROVED_CMIS'",
                 String.class, dtuongQly, month, period
         );
+    }
+
+    @Override
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public List<String> batchClaimProcessingWorkers(List<String> maKhangs, String month, int period,
+                                                     String workerNodeId, int claimTimeoutMinutes) {
+        if (maKhangs == null || maKhangs.isEmpty()) return Collections.emptyList();
+
+        // Dùng IN (...) thay vì N lần UPDATE riêng lẻ — giảm N×1000 round-trips xuống còn 1
+        StringBuilder inClause = new StringBuilder();
+        for (int i = 0; i < maKhangs.size(); i++) {
+            if (i > 0) inClause.append(",");
+            inClause.append("'").append(maKhangs.get(i).replace("'", "''")).append("'");
+        }
+        String sql = "UPDATE trang_thai_tinh_toan_kh SET ten_worker = ?, updated_at = NOW() " +
+                "WHERE ma_khang IN (" + inClause + ") AND thang_chu_ky = ? AND ky_chot = ? " +
+                "AND trang_thai = 'PROCESSING' " +
+                "AND (ten_worker IS NULL OR updated_at < NOW() - (? * INTERVAL '1 minute')) " +
+                "RETURNING ma_khang";
+        try {
+            return jdbcTemplate.queryForList(sql, String.class, workerNodeId, month, period, claimTimeoutMinutes);
+        } catch (Exception e) {
+            log.warn("[BATCH-CLAIM] Batch claim failed, falling back to empty list: {}", e.getMessage());
+            return Collections.emptyList();
+        }
     }
 }

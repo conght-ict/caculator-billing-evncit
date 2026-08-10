@@ -57,12 +57,10 @@ spring:
     consumer:
       group-id: mediation-group
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       max-poll-records: 1000
       properties:
         spring.json.trusted.packages: "*"
-        spring.json.value.default.type: com.evn.billing.mediation.dto.CmisReadingEvent
-        spring.json.use.type.headers: false
       auto-offset-reset: earliest
     producer:
       key-serializer: org.apache.kafka.common.serialization.StringSerializer

@@ -1,10 +1,12 @@
 package com.evn.billing.common.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import java.time.LocalDate;
 import java.util.List;
 
 @Data
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class MeterPointNode {
     private String maDdo;
     private CalculationType calculationType;

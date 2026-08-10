@@ -55,8 +55,27 @@ public class MonitoringQueryRepositoryImpl implements MonitoringQueryRepository 
 
     @Override
     public List<Map<String, Object>> findCalculationLogs(String dtuongQly, String maKhang, String status, int limit) {
-        StringBuilder query = new StringBuilder(
-                "SELECT id_log AS log_id, dtuong_qly AS dtuong_qly, ma_khang AS account_id, thang_chu_ky AS billing_cycle_month, trang_thai AS status, thong_bao_loi AS error_message, created_at FROM nhat_ky_tinh_toan WHERE 1=1 ");
+        StringBuilder query = new StringBuilder();
+        query.append("SELECT log_id, dtuong_qly, account_id, billing_cycle_month, status, error_message, created_at FROM (");
+        
+        // Subquery 1: nhat_ky_tinh_toan
+        query.append("SELECT id_log::text AS log_id, dtuong_qly, ma_khang AS account_id, thang_chu_ky AS billing_cycle_month, ");
+        query.append("trang_thai AS status, thong_bao_loi AS error_message, created_at ");
+        query.append("FROM nhat_ky_tinh_toan ");
+        
+        query.append("UNION ALL ");
+        
+        // Subquery 2: nhat_ky_huy_tinh (audit cancel logs)
+        query.append("SELECT id::text AS log_id, ");
+        query.append("(SELECT d.dtuong_qly FROM diem_do d WHERE d.ma_khang = h.ma_khang LIMIT 1) AS dtuong_qly, ");
+        query.append("ma_khang AS account_id, thang_chu_ky AS billing_cycle_month, ");
+        query.append("'CANCELLED' AS status, ");
+        query.append("CONCAT('Người hủy: ', nguoi_huy, ' | Lý do: ', COALESCE(ly_do_huy, 'Không có'), ' | Nguồn: ', nguon_huy) AS error_message, ");
+        query.append("thoi_gian_huy AS created_at ");
+        query.append("FROM nhat_ky_huy_tinh h");
+        
+        query.append(") combined WHERE 1=1 ");
+
         List<Object> args = new ArrayList<>();
 
         if (dtuongQly != null && !dtuongQly.trim().isEmpty()) {
@@ -64,11 +83,11 @@ public class MonitoringQueryRepositoryImpl implements MonitoringQueryRepository 
             args.add(dtuongQly.trim());
         }
         if (maKhang != null && !maKhang.trim().isEmpty()) {
-            query.append("AND ma_khang = ? ");
+            query.append("AND account_id = ? ");
             args.add(maKhang.trim());
         }
         if (status != null && !status.trim().isEmpty()) {
-            query.append("AND trang_thai = ? ");
+            query.append("AND status = ? ");
             args.add(status.trim());
         }
 
@@ -86,6 +105,24 @@ public class MonitoringQueryRepositoryImpl implements MonitoringQueryRepository 
                     logId);
             return Optional.of(logEntry);
         } catch (Exception e) {
+            // Fallback for cancellation log details (numeric ID)
+            try {
+                if (logId != null && logId.matches("\\d+")) {
+                    Map<String, Object> logEntry = jdbcTemplate.queryForMap(
+                            "SELECT id::text AS log_id, " +
+                            "(SELECT d.dtuong_qly FROM diem_do d WHERE d.ma_khang = h.ma_khang LIMIT 1) AS dtuong_qly, " +
+                            "ma_khang AS account_id, thang_chu_ky AS billing_cycle_month, " +
+                            "'CANCELLED' AS status, " +
+                            "NULL AS input_data, NULL AS output_data, " +
+                            "CONCAT('Người hủy: ', nguoi_huy, ' | Lý do: ', COALESCE(ly_do_huy, 'Không có'), ' | Nguồn: ', nguon_huy) AS error_message, " +
+                            "thoi_gian_huy AS created_at " +
+                            "FROM nhat_ky_huy_tinh h WHERE id = ?",
+                            Long.parseLong(logId));
+                    return Optional.of(logEntry);
+                }
+            } catch (Exception ex) {
+                // ignore
+            }
             return Optional.empty();
         }
     }

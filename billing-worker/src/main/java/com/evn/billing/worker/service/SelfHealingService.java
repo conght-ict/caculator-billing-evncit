@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -45,12 +46,18 @@ public class SelfHealingService {
         int attempts = task.getPhienBanTinh(); // We can use calculationVersion to track retry attempts in task DTO
 
         if (attempts < MAX_RETRY_ATTEMPTS) {
-            // Route to Retry Queue
+            // Route to Retry Queue với notBefore header để tránh Thread.sleep trên consumer
             task.setPhienBanTinh(attempts + 1);
+            long delayMs = getDelayForAttempt(attempts + 1);
+            long notBefore = System.currentTimeMillis() + delayMs;
             try {
-                kafkaTemplate.send(RETRY_TOPIC, task.getMaKhang(), task);
-                log.info("[SELF-HEALING] Dispatched task to Retry Queue (Attempt {}/{}) for Account: {}", 
-                        attempts + 1, MAX_RETRY_ATTEMPTS, task.getMaKhang());
+                ProducerRecord<String, Object> retryRecord =
+                        new ProducerRecord<>(RETRY_TOPIC, task.getMaKhang(), task);
+                retryRecord.headers().add("notBefore",
+                        java.nio.ByteBuffer.allocate(8).putLong(notBefore).array());
+                kafkaTemplate.send(retryRecord);
+                log.info("[SELF-HEALING] Dispatched task to Retry Queue (Attempt {}/{}, notBefore={}s) for Account: {}",
+                        attempts + 1, MAX_RETRY_ATTEMPTS, delayMs / 1000, task.getMaKhang());
             } catch (Exception e) {
                 log.error("[SELF-HEALING] Failed to route to retry topic: {}", e.getMessage());
             }
@@ -147,6 +154,15 @@ public class SelfHealingService {
             }
         } catch (Exception e) {
             log.error("[SELF-HEALING] Error sweeping DLQ table: {}", e.getMessage(), e);
+        }
+    }
+
+    private long getDelayForAttempt(int attempt) {
+        switch (attempt) {
+            case 1: return 30_000L;   // 30 giây
+            case 2: return 120_000L;  // 2 phút
+            case 3: return 300_000L;  // 5 phút (KHÔNG VƯỢT max.poll.interval.ms=300000)
+            default: return 30_000L;
         }
     }
 }

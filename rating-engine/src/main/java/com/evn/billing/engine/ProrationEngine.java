@@ -17,7 +17,8 @@ public class ProrationEngine {
     private final BillingCalculator calculator = new BillingCalculator();
 
     /**
-     * Calculates pro-rata billing when a price change occurs in the middle of the billing cycle.
+     * Calculates pro-rata billing when a price change occurs in the middle of the
+     * billing cycle.
      */
     public CalculationResult calculateProrated(
             BillingConfigSnapshot config,
@@ -122,17 +123,17 @@ public class ProrationEngine {
             long daysUsed,
             String tariffCodeOverride,
             String cycleMonth) throws Exception {
-        
+
         // Deep clone BillingConfigSnapshot to isolate modifications
         BillingConfigSnapshot copy = copySnapshot(config);
-        
+
         // Override tariffCode in cloned meter topology
         if (copy.getMeterTopology() != null && copy.getMeterTopology().getRootPoints() != null) {
             for (MeterPointNode root : copy.getMeterTopology().getRootPoints()) {
                 overrideTariffCode(root, tariffCodeOverride);
             }
         }
-        
+
         return calculator.calculate(copy, consumptions, cycleMonth, daysUsed);
     }
 
@@ -151,7 +152,6 @@ public class ProrationEngine {
         BillingConfigSnapshot dest = new BillingConfigSnapshot();
         dest.setMaKhang(src.getMaKhang());
         dest.setDtuongQly(src.getDtuongQly());
-        dest.setBillingSchemaVersion(src.getBillingSchemaVersion());
         dest.setSoHo(src.getSoHo());
         dest.setLoaiKhangStr(src.getLoaiKhangStr());
         dest.setNgayHieuLuc(src.getNgayHieuLuc());
@@ -167,7 +167,8 @@ public class ProrationEngine {
     }
 
     private MeterTopology cloneTopology(MeterTopology src) {
-        if (src == null) return null;
+        if (src == null)
+            return null;
         MeterTopology dest = new MeterTopology();
         if (src.getRootPoints() != null) {
             List<MeterPointNode> roots = new ArrayList<>();
@@ -180,7 +181,8 @@ public class ProrationEngine {
     }
 
     private MeterPointNode cloneNode(MeterPointNode src) {
-        if (src == null) return null;
+        if (src == null)
+            return null;
         MeterPointNode dest = new MeterPointNode();
         dest.setMaDdo(src.getMaDdo());
         dest.setCalculationType(src.getCalculationType());
@@ -197,7 +199,8 @@ public class ProrationEngine {
     }
 
     private long ChronoUnit_DAYS_between_plus_one(LocalDate start, LocalDate end) {
-        if (start.isAfter(end)) return 0;
+        if (start.isAfter(end))
+            return 0;
         return ChronoUnit.DAYS.between(start, end) + 1;
     }
 }

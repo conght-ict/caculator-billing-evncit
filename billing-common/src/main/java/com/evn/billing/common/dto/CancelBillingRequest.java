@@ -11,4 +11,6 @@ public class CancelBillingRequest {
     private String maKhang;
     private String thangChuKy;
     private Integer kyChot = 1;
+    private String nguoiHuy;
+    private String lyDoHuy;
 }

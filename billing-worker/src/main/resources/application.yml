@@ -51,12 +51,13 @@ spring:
       group-id: billing-worker-group
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
       value-deserializer: org.springframework.kafka.support.serializer.JsonDeserializer
-      max-poll-records: 1000
+      max-poll-records: 100
       properties:
         # Static Membership mapping based on host name
         group.instance.id: worker-pod-${HOSTNAME:local-worker}
-        session.timeout.ms: 30000
-        max.poll.interval.ms: 300000
+        session.timeout.ms: 45000
+        heartbeat.interval.ms: 3000
+        max.poll.interval.ms: 600000
         partition.assignment.strategy: org.apache.kafka.clients.consumer.CooperativeStickyAssignor
         spring.json.trusted.packages: "*"
         spring.json.value.default.type: com.evn.billing.common.dto.BillingTaskDto
@@ -65,6 +66,15 @@ spring:
         fetch.max.wait.ms: 500
       auto-offset-reset: earliest
       enable-auto-commit: false
+    producer:
+      acks: all
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.springframework.kafka.support.serializer.JsonSerializer
+      properties:
+        enable.idempotence: true
+        max.in.flight.requests.per.connection: 5
+        linger.ms: 5
+        compression.type: lz4
     listener:
       ack-mode: manual_immediate
 

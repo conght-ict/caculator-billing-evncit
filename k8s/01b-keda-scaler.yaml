@@ -8,8 +8,8 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: billing-worker
-  minReplicaCount: 4
-  maxReplicaCount: 32
+  minReplicaCount: 1
+  maxReplicaCount: 1
   cooldownPeriod: 30
   pollingInterval: 15
   triggers:

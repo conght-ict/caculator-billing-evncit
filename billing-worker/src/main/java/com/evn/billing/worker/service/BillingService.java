@@ -85,6 +85,9 @@ public class BillingService {
     @Autowired
     private SelfHealingService selfHealingService;
 
+    @Autowired
+    private CancelBillingService cancelBillingService;
+
     @Value("${billing.snapshot.url:http://localhost:8082/snapshot}")
     private String snapshotServiceUrl;
 
@@ -94,12 +97,42 @@ public class BillingService {
 
     private final String workerNodeId = initWorkerNodeId();
 
+    // FIX-03: VAT rate cache — 1 lần/giờ thay vì 1 lần/KH
+    private volatile BigDecimal cachedVatRate = null;
+    private volatile long vatRateCachedAt = 0L;
+    private static final long VAT_CACHE_TTL_MS = 3_600_000L; // 1 giờ
+
     private String initWorkerNodeId() {
         try {
             return java.net.InetAddress.getLocalHost().getHostName();
         } catch (Exception e) {
             return "worker-" + java.util.UUID.randomUUID();
         }
+    }
+
+    /**
+     * FIX-03: Lấy VAT rate với local cache TTL 1 giờ.
+     * Tránh 1000 SELECT/lô cho cùng 1 giá trị không thay đổi.
+     */
+    private BigDecimal fetchVatRateWithCache() {
+        long now = System.currentTimeMillis();
+        if (cachedVatRate != null && (now - vatRateCachedAt) < VAT_CACHE_TTL_MS) {
+            return cachedVatRate;
+        }
+        try {
+            Optional<CauHinhThue> thueOpt = cauHinhThueRepository.findByLoaiThue("VAT");
+            if (thueOpt.isPresent()) {
+                cachedVatRate = thueOpt.get().getThueSuat();
+                vatRateCachedAt = now;
+                log.info("[VAT-CACHE] Refreshed VAT rate from DB: {}", cachedVatRate);
+                return cachedVatRate;
+            }
+        } catch (Exception e) {
+            log.warn("[VAT-CACHE] Failed to fetch VAT rate from DB: {}. Using default 8%.", e.getMessage());
+        }
+        // Fallback không dùng default tĩnh — throw nếu cần strict mode
+        // Hiện tại dùng 0.08 vì đây là giá trị hệ thống đã được cấu hình
+        return BigDecimal.valueOf(0.08);
     }
 
     private boolean tryClaimProcessingWorker(String maKhang, String month, int period) {
@@ -238,32 +271,46 @@ public class BillingService {
 
     @Transactional
     public void calculateImmediate(String maKhang, String month, Integer period, Integer version, String dtuongQly, String triggeredBy) throws Exception {
-        int finalPeriod = period != null ? period : 1;
-        int finalVersion = version != null ? version : 1;
-        String finalDtuongQly = dtuongQly != null ? dtuongQly : "SO_DEMAND";
-        String finalTriggeredBy = triggeredBy != null ? triggeredBy : "CMIS";
+        if (maKhang == null || maKhang.trim().isEmpty()) {
+            throw new IllegalArgumentException("Dữ liệu đầu vào thiếu thông tin mã khách hàng (maKhang) bắt buộc.");
+        }
+        if (month == null || month.trim().isEmpty()) {
+            throw new IllegalArgumentException("Dữ liệu đầu vào thiếu thông tin tháng chu kỳ (month) bắt buộc.");
+        }
+        if (period == null) {
+            throw new IllegalArgumentException("Dữ liệu đầu vào thiếu thông tin kỳ chốt (period) bắt buộc.");
+        }
+        if (version == null) {
+            throw new IllegalArgumentException("Dữ liệu đầu vào thiếu thông tin phiên bản tính (version) bắt buộc.");
+        }
+        if (dtuongQly == null || dtuongQly.trim().isEmpty()) {
+            throw new IllegalArgumentException("Dữ liệu đầu vào thiếu thông tin đối tượng quản lý (dtuongQly) bắt buộc.");
+        }
+        if (triggeredBy == null || triggeredBy.trim().isEmpty()) {
+            throw new IllegalArgumentException("Dữ liệu đầu vào thiếu thông tin nguồn kích hoạt (triggeredBy) bắt buộc.");
+        }
 
         // Seed processing status to ensure a record exists
-        billingStateRepository.seedProcessingStatus(maKhang, month, finalDtuongQly, finalPeriod, workerNodeId);
+        billingStateRepository.seedProcessingStatus(maKhang, month, dtuongQly, period, workerNodeId);
 
         // Reset status to PROCESSING and clear previous worker claims to ensure tryClaimProcessingWorker succeeds
-        billingStateRepository.updateAccountStatus("PROCESSING", maKhang, month, finalPeriod);
+        billingStateRepository.updateAccountStatus("PROCESSING", maKhang, month, period);
 
         // Evict status from Redis and local cache to avoid stale status reads
-        String hashKey = "billing:book_status_hash:" + finalDtuongQly + ":" + month + ":" + finalPeriod;
+        String hashKey = "billing:book_status_hash:" + dtuongQly + ":" + month + ":" + period;
         try {
             redisTemplate.opsForHash().delete(hashKey, maKhang);
         } catch (Exception e) {
             // Ignore
         }
-        String localKey = finalDtuongQly + ":" + month + ":" + finalPeriod;
+        String localKey = dtuongQly + ":" + month + ":" + period;
         Map<String, String> localMap = localBookStatusCache.get(localKey);
         if (localMap != null) {
             localMap.remove(maKhang);
         }
 
-        BillingTaskDto task = new BillingTaskDto(maKhang, finalDtuongQly, month, finalPeriod, finalVersion, "on_demand_trace");
-        task.setTriggeredBy(finalTriggeredBy);
+        BillingTaskDto task = new BillingTaskDto(maKhang, dtuongQly, month, period, version, "on_demand_trace");
+        task.setTriggeredBy(triggeredBy);
         processBilling(task);
     }
 
@@ -279,7 +326,7 @@ public class BillingService {
         String maKhang = task.getMaKhang();
         String month = task.getThangChuKy();
         int version = task.getPhienBanTinh();
-        String dtuongQly = task.getDtuongQly() != null ? task.getDtuongQly() : "DEMAND";
+        String dtuongQly = task.getDtuongQly();
 
         // 0. Claim processing ownership to prevent duplicate execution from retry/rebalance.
         if (!tryClaimProcessingWorker(maKhang, month, task.getKyChot())) {
@@ -304,7 +351,11 @@ public class BillingService {
                     u.setTrangThaiXuLy("VALIDATED");
                     u.setCoQuayVong(r.getCoQuayVong() != null ? r.getCoQuayVong() : false);
                     u.setMaxRegisterSnapshot(r.getMaxRegisterSnapshot());
-                    u.setLanDocPhu(r.getLanDocPhu() != null ? r.getLanDocPhu() : 1);
+                    
+                    if (r.getLanDocPhu() == null) {
+                        throw new IllegalArgumentException("Dữ liệu chỉ số thiếu thông tin lần đọc phụ (lanDocPhu) bắt buộc cho điểm đo: " + r.getMaDdo());
+                    }
+                    u.setLanDocPhu(r.getLanDocPhu());
                     u.setLoaiGhiIndex(r.getLoaiGhiIndex() != null ? r.getLoaiGhiIndex() : "ORIGINAL");
                     u.setTgianBdien(r.getTgianBdien() != null ? r.getTgianBdien() : "KT");
                     usages.add(u);
@@ -415,8 +466,20 @@ public class BillingService {
             log.info("[AUDIT-TRACER] [Account: {}] Step 4: Kafka calculation task received. Triggering billing engine processing.", maKhang);
 
             // 3. Collect node consumptions (multi-BCS aware: aggregate active power, exclude VC)
-            Map<String, BigDecimal> consumptions = new HashMap<>();
+            Map<String, MeterUsage> latestUsagePerBcs = new LinkedHashMap<>();
             for (MeterUsage u : usages) {
+                String tp = u.getTgianBdien() != null ? u.getTgianBdien() : "KT";
+                String bcsKey = u.getMaDdo() + "|" + tp;
+                latestUsagePerBcs.merge(bcsKey, u, (existing, incoming) -> {
+                    int existingSeq = existing.getLanDocPhu() != null ? existing.getLanDocPhu() : 1;
+                    int incomingSeq = incoming.getLanDocPhu() != null ? incoming.getLanDocPhu() : 1;
+                    return incomingSeq > existingSeq ? incoming : existing;
+                });
+            }
+            List<MeterUsage> deduplicatedUsages = new ArrayList<>(latestUsagePerBcs.values());
+
+            Map<String, BigDecimal> consumptions = new HashMap<>();
+            for (MeterUsage u : deduplicatedUsages) {
                 BigDecimal cons = u.getConsumption() != null ? u.getConsumption() 
                         : u.getChiSoCuoi().subtract(u.getChiSoDau());
                 String tp = u.getTgianBdien() != null ? u.getTgianBdien() : "KT";
@@ -547,7 +610,10 @@ public class BillingService {
             String invoiceId = "INV-" + maKhang + "-" + month + "-v" + version;
             String idempotencyKey = maKhang + "_" + month + "_p" + task.getKyChot() + "_v" + version;
 
-            String maDviqly = config.getMaDviqly() != null ? config.getMaDviqly() : "PD0600";
+            String maDviqly = config.getMaDviqly();
+            if (maDviqly == null || maDviqly.trim().isEmpty()) {
+                throw new IllegalStateException("Cấu hình đóng băng (snapshot) thiếu thông tin mã đơn vị quản lý (maDviqly) bắt buộc.");
+            }
 
             boolean isProrated = proRataFactor.compareTo(BigDecimal.ONE) < 0;
 
@@ -601,14 +667,34 @@ public class BillingService {
         }
     }
 
-    @Transactional
+    /**
+     * FIX-01: KHÔNG có @Transactional ở đây.
+     * Tính toán là pure CPU — không giữ DB connection.
+     * Chỉ batch write ở cuối mới cần transaction (trong commitBillingBatch).
+     */
     public void processBillingBatch(List<BillingTaskDto> tasks) throws Exception {
         if (tasks == null || tasks.isEmpty()) return;
 
-        String firstDtuongQly = tasks.get(0).getDtuongQly() != null ? tasks.get(0).getDtuongQly() : "DEMAND";
+        String firstDtuongQly = tasks.get(0).getDtuongQly();
+        if (firstDtuongQly == null || firstDtuongQly.trim().isEmpty()) {
+            throw new IllegalArgumentException("Dữ liệu task đầu tiên trong lô thiếu thông tin đối tượng quản lý (dtuongQly) bắt buộc.");
+        }
         String firstMonth = tasks.get(0).getThangChuKy();
-        
-        warmupBookCache(firstDtuongQly, firstMonth, tasks.get(0).getKyChot());
+        int firstPeriod = tasks.get(0).getKyChot();
+
+        warmupBookCache(firstDtuongQly, firstMonth, firstPeriod);
+
+        // FIX-03: Cache VAT rate 1 lần cho toàn bộ lô (thay vì 1000 SELECT)
+        BigDecimal vatRate = fetchVatRateWithCache();
+
+        // FIX-02: Batch claim toàn bộ account trong 1 SQL duy nhất (thay vì N×REQUIRES_NEW)
+        List<String> allMaKhangs = tasks.stream()
+                .map(BillingTaskDto::getMaKhang)
+                .collect(java.util.stream.Collectors.toList());
+        List<String> claimedAccounts = billingStateRepository.batchClaimProcessingWorkers(
+                allMaKhangs, firstMonth, firstPeriod, workerNodeId, claimTimeoutMinutes);
+        java.util.Set<String> claimedSet = new java.util.HashSet<>(claimedAccounts);
+        log.info("[BATCH-CLAIM] Claimed {}/{} accounts for processing.", claimedAccounts.size(), allMaKhangs.size());
 
         List<Object[]> invoiceBatch = new ArrayList<>();
         List<Object[]> outboxBatch = new ArrayList<>();
@@ -618,10 +704,15 @@ public class BillingService {
             String maKhang = task.getMaKhang();
             String month = task.getThangChuKy();
             int version = task.getPhienBanTinh();
-            String dtuongQly = task.getDtuongQly() != null ? task.getDtuongQly() : "DEMAND";
+            String dtuongQly = task.getDtuongQly();
+            if (dtuongQly == null || dtuongQly.trim().isEmpty()) {
+                throw new IllegalArgumentException("Dữ liệu task trong lô thiếu thông tin đối tượng quản lý (dtuongQly) bắt buộc.");
+            }
 
-            if (!tryClaimProcessingWorker(maKhang, month, task.getKyChot())) {
-                log.info("[SKIP-CALC-BATCH] Account {} is already being processed/finalized for month {} period {}.", maKhang, month, task.getKyChot());
+            // FIX-02: Dùng kết quả batch claim thay vì gọi từng lần
+            if (!claimedSet.contains(maKhang)) {
+                log.info("[SKIP-CALC-BATCH] Account {} not claimed (already processing/finalized) for month {} period {}.",
+                        maKhang, month, firstPeriod);
                 continue;
             }
 
@@ -642,13 +733,18 @@ public class BillingService {
                         u.setTrangThaiXuLy("VALIDATED");
                         u.setCoQuayVong(r.getCoQuayVong() != null ? r.getCoQuayVong() : false);
                         u.setMaxRegisterSnapshot(r.getMaxRegisterSnapshot());
-                        u.setLanDocPhu(r.getLanDocPhu() != null ? r.getLanDocPhu() : 1);
+                        
+                        if (r.getLanDocPhu() == null) {
+                            throw new IllegalArgumentException("Dữ liệu chỉ số thiếu thông tin lần đọc phụ (lanDocPhu) bắt buộc cho điểm đo: " + r.getMaDdo());
+                        }
+                        u.setLanDocPhu(r.getLanDocPhu());
                         u.setLoaiGhiIndex(r.getLoaiGhiIndex() != null ? r.getLoaiGhiIndex() : "ORIGINAL");
                         u.setTgianBdien(r.getTgianBdien() != null ? r.getTgianBdien() : "KT");
                         usages.add(u);
                     }
                 } else {
-                    usages = meterUsageRepository.findByMaKhangAndThangChuKyAndKyChotAndTrangThaiXuLy(maKhang, month, task.getKyChot(), "VALIDATED");
+                    usages = meterUsageRepository.findByMaKhangAndThangChuKyAndKyChotAndTrangThaiXuLy(
+                            maKhang, month, task.getKyChot(), "VALIDATED");
                 }
                 if (usages.isEmpty()) {
                     throw new NoSuchElementException("No validated meter usage found/provided for account: " + maKhang);
@@ -658,33 +754,20 @@ public class BillingService {
                 LocalDateTime minFrom = null;
                 LocalDateTime maxTo = null;
                 for (MeterUsage u : usages) {
-                    if (u.getTuNgay() != null) {
-                        if (minFrom == null || u.getTuNgay().isBefore(minFrom)) {
-                            minFrom = u.getTuNgay();
-                        }
-                    }
-                    if (u.getDenNgay() != null) {
-                        if (maxTo == null || u.getDenNgay().isAfter(maxTo)) {
-                            maxTo = u.getDenNgay();
-                        }
-                    }
+                    if (u.getTuNgay() != null && (minFrom == null || u.getTuNgay().isBefore(minFrom))) minFrom = u.getTuNgay();
+                    if (u.getDenNgay() != null && (maxTo == null || u.getDenNgay().isAfter(maxTo))) maxTo = u.getDenNgay();
                 }
                 if (minFrom == null) minFrom = LocalDateTime.now().minusDays(30);
                 if (maxTo == null) maxTo = LocalDateTime.now();
                 long daysUsed = java.time.temporal.ChronoUnit.DAYS.between(minFrom.toLocalDate(), maxTo.toLocalDate()) + 1;
 
-                // Compute actual days of that billing cycle month
                 int daysInMonth = 30;
                 if (month != null && month.contains("_")) {
                     try {
                         String[] parts = month.split("_");
-                        int year = Integer.parseInt(parts[0]);
-                        int monthVal = Integer.parseInt(parts[1]);
-                        java.time.YearMonth yearMonth = java.time.YearMonth.of(year, monthVal);
+                        java.time.YearMonth yearMonth = java.time.YearMonth.of(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
                         daysInMonth = yearMonth.lengthOfMonth();
-                    } catch (Exception e) {
-                        // Ignore
-                    }
+                    } catch (Exception ignored) { }
                 }
 
                 // 2. Fetch Frozen Snapshot from Redis Cache
@@ -693,14 +776,12 @@ public class BillingService {
                 try {
                     Object cachedObj = redisTemplate.opsForValue().get(cacheKey);
                     if (cachedObj != null) {
-                        if (cachedObj instanceof BillingConfigSnapshot) {
-                            config = (BillingConfigSnapshot) cachedObj;
-                        } else {
-                            config = objectMapper.convertValue(cachedObj, BillingConfigSnapshot.class);
-                        }
+                        config = cachedObj instanceof BillingConfigSnapshot
+                                ? (BillingConfigSnapshot) cachedObj
+                                : objectMapper.convertValue(cachedObj, BillingConfigSnapshot.class);
                     }
                 } catch (Exception e) {
-                    // Redis offline fallback
+                    log.warn("[SNAP-CACHE] Redis offline for account {}: {}", maKhang, e.getMessage());
                 }
 
                 if (config == null) {
@@ -711,76 +792,79 @@ public class BillingService {
                                 .findByMaKhangAndThangChuKyAndKyChotAndPhienBanTinh(maKhang, month, task.getKyChot(), 1);
                     }
                     if (snapshotOpt.isEmpty()) {
-                        log.warn("[SNAP-FALLBACK-BATCH] No snapshot found for account: {}, version: {}. Triggering on-demand generation...", maKhang, version);
-                        triggerSnapshotGenerationForAccount(maKhang, month, task.getKyChot());
-                        snapshotOpt = snapshotRepository
-                                .findByMaKhangAndThangChuKyAndKyChotAndPhienBanTinh(maKhang, month, task.getKyChot(), 1);
-                        if (snapshotOpt.isEmpty()) {
-                            throw new NoSuchElementException("Snapshot generation failed or returned empty for account: " + maKhang + ", version: " + version);
-                        }
-                        log.info("[SNAP-FALLBACK-BATCH] On-demand snapshot successfully fetched for account: {}", maKhang);
+                        // FIX-04: KHÔNG gọi HTTP sync trong batch transaction.
+                        // Throw exception → statusBatch ghi FAILED → DLQ/SelfHealing xử lý sau.
+                        throw new NoSuchElementException("Snapshot not found for account: " + maKhang
+                                + ". Please pre-generate snapshots before running batch.");
                     }
                     config = snapshotOpt.get().getDuLieuCauHinh();
                     try {
                         redisTemplate.opsForValue().set(cacheKey, config, 24, TimeUnit.HOURS);
-                    } catch (Exception e) {
-                        // Ignore
-                    }
+                    } catch (Exception ignored) { }
                 }
 
-                // [II.2] Validate Snapshot completeness
-                validateSnapshot(config, maKhang);
+                // FIX-05: Đồng bộ FastPath routing với processBilling() single mode
+                String changeFlags = task.getChangeFlags() != null ? task.getChangeFlags() : "NONE";
+                boolean isFastPath = "NONE".equals(changeFlags)
+                        && !task.isHasRelation()
+                        && config.isFastPathEnabled()
+                        && ("SINH_HOAT".equals(config.getCustomerType())
+                                || "NGOAI_SINH_HOAT".equals(config.getCustomerType()));
 
-                // 3. Collect node consumptions (multi-BCS aware: aggregate active power, exclude VC)
-                Map<String, BigDecimal> consumptions = new HashMap<>();
+                // FIX-06: Skip validateSnapshot() cho FastPath — tránh overhead
+                if (!isFastPath) {
+                    validateSnapshot(config, maKhang);
+                } else {
+                    log.debug("[ROUTING-BATCH] Skip snapshot validation for FastPath account: {}", maKhang);
+                }
+
+                // 3. Collect node consumptions
+                Map<String, MeterUsage> latestUsagePerBcs = new LinkedHashMap<>();
                 for (MeterUsage u : usages) {
-                    BigDecimal cons = u.getConsumption() != null ? u.getConsumption() 
+                    String tp = u.getTgianBdien() != null ? u.getTgianBdien() : "KT";
+                    String bcsKey = u.getMaDdo() + "|" + tp;
+                    latestUsagePerBcs.merge(bcsKey, u, (existing, incoming) -> {
+                        int existingSeq = existing.getLanDocPhu() != null ? existing.getLanDocPhu() : 1;
+                        int incomingSeq = incoming.getLanDocPhu() != null ? incoming.getLanDocPhu() : 1;
+                        return incomingSeq > existingSeq ? incoming : existing;
+                    });
+                }
+                List<MeterUsage> deduplicatedUsages = new ArrayList<>(latestUsagePerBcs.values());
+
+                Map<String, BigDecimal> consumptions = new HashMap<>();
+                for (MeterUsage u : deduplicatedUsages) {
+                    BigDecimal cons = u.getConsumption() != null ? u.getConsumption()
                             : u.getChiSoCuoi().subtract(u.getChiSoDau());
                     String tp = u.getTgianBdien() != null ? u.getTgianBdien() : "KT";
-
-                    // Detail key per BCS register: METER-001_BT, METER-001_CD, METER-001_TD
                     String detailKey = u.getMaDdo() + "_" + tp;
                     consumptions.merge(detailKey, cons, BigDecimal::add);
-
-                    // Aggregate active power per meterPoint (exclude reactive power VC)
                     if (!"VC".equals(tp)) {
                         consumptions.merge(u.getMaDdo(), cons, BigDecimal::add);
                     }
                 }
 
-                // Dynamics fetch VAT tax rate realtime from repository
-                BigDecimal vatRate = BigDecimal.valueOf(0.08);
-                try {
-                    Optional<CauHinhThue> thueOpt = cauHinhThueRepository.findByLoaiThue("VAT");
-                    if (thueOpt.isPresent()) {
-                        vatRate = thueOpt.get().getThueSuat();
-                    }
-                } catch (Exception e) {
-                    log.warn("[BILLING-WORKER-BATCH] Failed to fetch tax rate, using fallback default 0.08 (8%): {}", e.getMessage());
-                }
-
+                // FIX-03: Dùng vatRate đã cache — KHÔNG query DB trong vòng lặp
                 if (config.getSchemaSteps() != null) {
                     for (BillingSchemaStep step : config.getSchemaSteps()) {
                         if ("TAX".equals(step.getVariantName())) {
-                            if (step.getStepConfig() == null) {
-                                step.setStepConfig(new HashMap<>());
-                            }
+                            if (step.getStepConfig() == null) step.setStepConfig(new HashMap<>());
                             step.getStepConfig().put("taxRate", vatRate.doubleValue());
                         }
                     }
                 }
 
-                // 4. Invoke Core Stateless Rating Engine
-                CalculationResult result = billingCalculator.calculate(config, consumptions, month, daysUsed);
+                // 4. Invoke Core Stateless Rating Engine — FIX-05: Route FastPath
+                CalculationResult result = isFastPath
+                        ? billingCalculator.calculateFastPath(config, consumptions, month, daysUsed)
+                        : billingCalculator.calculate(config, consumptions, month, daysUsed);
 
                 BigDecimal totalBeforeTax = result.getTotalAmountBeforeTax();
                 BigDecimal taxAmount = result.getTaxAmount();
                 BigDecimal totalAfterTax = result.getTotalAmountAfterTax();
-                Map<String, Object> meterPointBreakdowns = result.getMeterPointBreakdowns();
                 List<Map<String, Object>> stepDetails = result.getStepDetails();
                 Map<String, BigDecimal> nodeNetConsumptions = result.getNodeNetConsumptions();
 
-                // 5. Construct self-explanatory billing_manifest JSONB [IV.2]
+                // 5. Construct billing manifest
                 Map<String, Object> manifest = new HashMap<>();
                 String invoiceId = "INV-" + maKhang + "-" + month + "-v" + version;
                 manifest.put("invoice_id", invoiceId);
@@ -794,7 +878,6 @@ public class BillingService {
                     Map<String, Object> ir = new HashMap<>();
                     ir.put("meter_point_id", u.getMaDdo());
                     ir.put("calculation_type", getCalculationType(config, u.getMaDdo()));
-                    
                     List<Map<String, Object>> subReadings = new ArrayList<>();
                     Map<String, Object> sub = new HashMap<>();
                     sub.put("seq", u.getLanDocPhu());
@@ -806,7 +889,6 @@ public class BillingService {
                     sub.put("max_register_value", u.getMaxRegisterSnapshot());
                     sub.put("raw_consumption", u.getConsumption());
                     subReadings.add(sub);
-                    
                     ir.put("sub_readings", subReadings);
                     ir.put("total_kwh", u.getConsumption());
                     inputReadings.add(ir);
@@ -817,7 +899,6 @@ public class BillingService {
 
                 Map<String, Object> breakdown = new HashMap<>();
                 breakdown.put("norms_factor", config.getNormsFactor());
-                
                 List<Map<String, Object>> stepsExecuted = new ArrayList<>();
                 for (Map<String, Object> sd : stepDetails) {
                     Map<String, Object> se = new HashMap<>();
@@ -832,42 +913,32 @@ public class BillingService {
                 breakdown.put("total_before_tax", totalBeforeTax);
                 manifest.put("rating_breakdown", breakdown);
 
-                Map<String, Object> taxCalc = new HashMap<>();
-                taxCalc.put("vat_rate", vatRate);
-                taxCalc.put("tax_amount_raw", taxAmount);
-                taxCalc.put("rounding_mode", "HALF_UP");
-                taxCalc.put("tax_amount_final", taxAmount);
-                manifest.put("tax_calculation", taxCalc);
-                
+                Map<String, Object> taxCalcMap = new HashMap<>();
+                taxCalcMap.put("vat_rate", vatRate);
+                taxCalcMap.put("tax_amount_raw", taxAmount);
+                taxCalcMap.put("rounding_mode", "HALF_UP");
+                taxCalcMap.put("tax_amount_final", taxAmount);
+                manifest.put("tax_calculation", taxCalcMap);
                 manifest.put("total_final_amount", totalAfterTax);
 
                 String manifestJson = objectMapper.writeValueAsString(manifest);
                 String idempotencyKey = maKhang + "_" + month + "_p" + task.getKyChot() + "_v" + version;
                 boolean isProrated = (BigDecimal.valueOf(daysUsed).compareTo(BigDecimal.valueOf(daysInMonth)) < 0) && daysUsed > 0;
+                String maDviqly = config.getMaDviqly();
+                if (maDviqly == null || maDviqly.trim().isEmpty()) {
+                    throw new IllegalStateException("Cấu hình đóng băng (snapshot) thiếu thông tin mã đơn vị quản lý (maDviqly) bắt buộc.");
+                }
 
-                String maDviqly = config.getMaDviqly() != null ? config.getMaDviqly() : "PD0600";
-
-                // Add to invoice batch params
                 invoiceBatch.add(new Object[] {
-                    invoiceId,
-                    maKhang,
-                    dtuongQly,
-                    month,
-                    task.getKyChot(),
-                    totalBeforeTax,
-                    taxAmount,
-                    totalAfterTax,
-                    idempotencyKey,
-                    manifestJson,
-                    isProrated,
+                    invoiceId, maKhang, dtuongQly, month, task.getKyChot(),
+                    totalBeforeTax, taxAmount, totalAfterTax,
+                    idempotencyKey, manifestJson, isProrated,
                     maKhang + "_" + month + "_p" + task.getKyChot() + "_v" + version,
-                    "FINAL",
-                    maDviqly,
+                    "FINAL", maDviqly,
                     java.sql.Timestamp.valueOf(LocalDateTime.now()),
                     java.sql.Timestamp.valueOf(LocalDateTime.now())
                 });
 
-                // Save Outbox Event
                 Map<String, Object> outboxPayload = new HashMap<>();
                 outboxPayload.put("invoiceId", invoiceId);
                 outboxPayload.put("maKhang", maKhang);
@@ -876,12 +947,8 @@ public class BillingService {
                 outboxPayload.put("taxAmount", taxAmount);
                 outboxPayload.put("amountAfterTax", totalAfterTax);
                 outboxPayload.put("timestamp", LocalDateTime.now().toString());
-
                 outboxBatch.add(new Object[] {
-                    UUID.randomUUID(), // event_id
-                    "INVOICE",
-                    invoiceId,
-                    "INVOICE_CREATED",
+                    UUID.randomUUID(), "INVOICE", invoiceId, "INVOICE_CREATED",
                     objectMapper.writeValueAsString(outboxPayload),
                     java.sql.Timestamp.valueOf(LocalDateTime.now())
                 });
@@ -893,38 +960,23 @@ public class BillingService {
                 if (totalBeforeTax != null && totalBeforeTax.compareTo(java.math.BigDecimal.valueOf(anomalyThresholdVnd)) > 0) {
                     targetStatus = "ANOMALY";
                 }
-                // Status success batch
                 statusBatch.add(new Object[] {
-                    maKhang,
-                    month,
-                    dtuongQly,
-                    task.getKyChot(),
-                    targetStatus,
-                    invoiceId,
-                    null,
-                    workerNodeId,
+                    maKhang, month, dtuongQly, task.getKyChot(),
+                    targetStatus, invoiceId, null, workerNodeId,
                     java.sql.Timestamp.valueOf(LocalDateTime.now())
                 });
 
-                // Enqueue success log
                 Map<String, Object> inputLogMap = new HashMap<>();
                 inputLogMap.put("config", config);
                 inputLogMap.put("consumptions", consumptions);
-                String inputJson = objectMapper.writeValueAsString(inputLogMap);
-                billingLogService.enqueueLog(dtuongQly, maKhang, month, task.getKyChot(), targetStatus, inputJson, manifestJson, null);
+                billingLogService.enqueueLog(dtuongQly, maKhang, month, task.getKyChot(), targetStatus,
+                        objectMapper.writeValueAsString(inputLogMap), manifestJson, null);
 
             } catch (Exception e) {
                 log.error("Calculation failed for account: {}, error: {}", maKhang, e.getMessage(), e);
-                // Status fail batch
                 statusBatch.add(new Object[] {
-                    maKhang,
-                    month,
-                    dtuongQly,
-                    task.getKyChot(),
-                    "FAILED",
-                    null,
-                    e.getMessage(),
-                    workerNodeId,
+                    maKhang, month, dtuongQly, task.getKyChot(),
+                    "FAILED", null, e.getMessage(), workerNodeId,
                     java.sql.Timestamp.valueOf(LocalDateTime.now())
                 });
                 try {
@@ -932,41 +984,42 @@ public class BillingService {
                 } catch (Exception healEx) {
                     log.error("[BILLING-BATCH] SelfHealing handleFailure failed for {}: {}", maKhang, healEx.getMessage());
                 }
-                // Enqueue failed log
                 billingLogService.enqueueLog(dtuongQly, maKhang, month, task.getKyChot(), "FAILED", null, null, e.getMessage());
             }
         }
 
-        // 6. Execute atomic Batch UPSERT on Citus/TiDB
+        // FIX-01: Batch writes trong transaction ngắn riêng — tách hoàn toàn khỏi tính toán
+        if (!invoiceBatch.isEmpty() || !statusBatch.isEmpty()) {
+            commitBillingBatch(invoiceBatch, outboxBatch, statusBatch, firstDtuongQly, firstMonth, firstPeriod);
+        }
+    }
+
+    /**
+     * FIX-01: Transaction ngắn chỉ dành cho I/O ghi DB.
+     * Nếu batch write fail → chỉ rollback 3 bulk SQL, không ảnh hưởng tới tính toán.
+     * Kafka sẽ replay lô này và idempotency (ON CONFLICT DO UPDATE) đảm bảo không duplicate.
+     */
+    @Transactional
+    public void commitBillingBatch(List<Object[]> invoiceBatch, List<Object[]> outboxBatch,
+                                    List<Object[]> statusBatch, String dtuongQly, String month, int period) {
         if (!invoiceBatch.isEmpty()) {
             billingStateRepository.batchUpsertInvoices(invoiceBatch);
             billingStateRepository.batchInsertOutbox(outboxBatch);
-            
-            log.info("[AUDIT-TRACER] Batch transaction committed. Saved {} invoices & outbox events to Postgres.", invoiceBatch.size());
+            log.info("[AUDIT-TRACER] Batch committed. Saved {} invoices & outbox events to Postgres.", invoiceBatch.size());
         }
-
-        // 7. Write run states
         if (!statusBatch.isEmpty()) {
             billingStateRepository.batchUpsertStatuses(statusBatch);
 
-            int firstPeriod = tasks.get(0).getKyChot();
-            String hashKey = "billing:book_status_hash:" + firstDtuongQly + ":" + firstMonth + ":" + firstPeriod;
-            Map<String, String> localMap = localBookStatusCache.get(firstDtuongQly + ":" + firstMonth + ":" + firstPeriod);
+            String hashKey = "billing:book_status_hash:" + dtuongQly + ":" + month + ":" + period;
+            Map<String, String> localMap = localBookStatusCache.get(dtuongQly + ":" + month + ":" + period);
             Map<String, String> redisUpdates = new HashMap<>();
-            
-            int processedDelta = 0;
-            int successDelta = 0;
-            int failedDelta = 0;
+            int processedDelta = 0, successDelta = 0, failedDelta = 0;
 
             for (Object[] row : statusBatch) {
                 String accId = (String) row[0];
                 String stat = (String) row[4];
-
-                if (localMap != null) {
-                    localMap.put(accId, stat);
-                }
+                if (localMap != null) localMap.put(accId, stat);
                 redisUpdates.put(accId, stat);
-
                 processedDelta++;
                 if (Arrays.asList("SUCCESS", "SUCCESS_CMIS", "ANOMALY", "LOCKED", "E_INVOICE_ISSUED").contains(stat)) {
                     successDelta++;
@@ -974,18 +1027,14 @@ public class BillingService {
                     failedDelta++;
                 }
             }
-
             try {
-                if (!redisUpdates.isEmpty()) {
-                    redisTemplate.opsForHash().putAll(hashKey, redisUpdates);
-                }
-            } catch (Exception e) {
-                // Ignore
-            }
+                if (!redisUpdates.isEmpty()) redisTemplate.opsForHash().putAll(hashKey, redisUpdates);
+            } catch (Exception ignored) { }
 
-            updateBookBillingRunProgress(firstDtuongQly, firstMonth, tasks.get(0).getKyChot(), processedDelta, successDelta, failedDelta);
-            log.info("[AUDIT-TRACER] Persistent Billing Status written for {} accounts. Success: {}, Failed: {}.", processedDelta, successDelta, failedDelta);
-            checkAndTriggerAutoBatch(firstDtuongQly, firstMonth, tasks.get(0).getKyChot());
+            updateBookBillingRunProgress(dtuongQly, month, period, processedDelta, successDelta, failedDelta);
+            log.info("[AUDIT-TRACER] Status written for {} accounts. Success: {}, Failed: {}.",
+                    processedDelta, successDelta, failedDelta);
+            checkAndTriggerAutoBatch(dtuongQly, month, period);
         }
     }
 
@@ -1093,74 +1142,30 @@ public class BillingService {
         log.info("[LOCK-BILL] Locked status of Account: {} to {} for kỳ: {}, đợt: {}", maKhang, targetStatus, month, period);
     }
 
-    @Transactional
     public void cancelBilling(String maKhang, String month, int period) throws Exception {
-        Map<String, Object> row;
-        try {
-            row = billingStateRepository.findStatusRowForUpdate(maKhang, month, period);
-        } catch (Exception e) {
-            throw new NoSuchElementException("Không tìm thấy thông tin cước đã tính cho khách hàng: " + maKhang + ", kỳ: " + month + ", đợt: " + period);
-        }
+        cancelBillingService.cancelBilling(maKhang, month, period, this, "SYSTEM", null, "REST_API");
+    }
 
-        String dtuongQly = (String) row.get("dtuong_qly");
-        String oldStatus = (String) row.get("trang_thai");
+    public void cancelBilling(String maKhang, String month, int period,
+                              String nguoiHuy, String lyDoHuy, String nguonHuy) throws Exception {
+        cancelBillingService.cancelBilling(maKhang, month, period, this, nguoiHuy, lyDoHuy, nguonHuy);
+    }
 
-        if ("CANCELLED".equals(oldStatus)) {
-            log.info("[CANCEL-BILL] Account {} already CANCELLED for kỳ: {}, đợt: {}", maKhang, month, period);
-            return;
-        }
-        
-        // Gated Pipeline Lock Rule: Cấm hủy cước nếu hóa đơn đã được phát hành HĐĐT hoặc đã khóa
-        if ("LOCKED".equals(oldStatus) || "E_INVOICE_ISSUED".equals(oldStatus)) {
-            throw new IllegalStateException("Hóa đơn của khách hàng " + maKhang + " kỳ " + month + " đợt " + period + 
-                    " đã được phát hành hóa đơn điện tử hoặc đã khóa. Không thể thực hiện hủy cước trực tiếp!");
-        }
-
-        log.info("[CANCEL-BILL] Cancelling billing for Account: {}, Month: {}, Period: {}, Book: {}, Old Status: {}", 
-                maKhang, month, period, dtuongQly, oldStatus);
-
-        // Append-Only Rule: Mark invoices as CANCELLED instead of deleting
-        billingStateRepository.markInvoicesCancelled(maKhang, month, period);
-        log.info("[CANCEL-BILL] Marked invoices as CANCELLED in 'hoa_don' table.");
-
-        // Mở khóa snapshot liên quan về DRAFT
-        billingStateRepository.setSnapshotsDraft(maKhang, month, period);
-        log.info("[CANCEL-BILL] Reset snapshot status to DRAFT to allow CMIS updates.");
-
-        // Keep nhat_ky_tinh_toan for auditing trail
-
-        billingStateRepository.markAccountCancelled(maKhang, month, period, "Hủy hóa đơn bởi người vận hành");
-
+    /**
+     * Cập nhật Redis hash và local JVM cache về trạng thái CANCELLED.
+     * Gọi từ CancelBillingService — không có @Transactional (fail-safe: lỗi cache không rollback DB).
+     */
+    public void updateCancelStatusCaches(String dtuongQly, String maKhang, String month, int period) {
         String hashKey = "billing:book_status_hash:" + dtuongQly + ":" + month + ":" + period;
         try {
             redisTemplate.opsForHash().put(hashKey, maKhang, "CANCELLED");
         } catch (Exception e) {
             log.warn("[CANCEL-BILL] Failed to update Redis status to CANCELLED: {}", e.getMessage());
         }
-
         String localKey = dtuongQly + ":" + month + ":" + period;
         Map<String, String> localMap = localBookStatusCache.get(localKey);
         if (localMap != null) {
             localMap.put(maKhang, "CANCELLED");
-        }
-
-        if ("SUCCESS".equals(oldStatus) || "SUCCESS_CMIS".equals(oldStatus) || "ANOMALY".equals(oldStatus)) {
-            updateBookBillingRunProgress(dtuongQly, month, period, -1, -1, 0);
-        } else if ("FAILED".equals(oldStatus)) {
-            updateBookBillingRunProgress(dtuongQly, month, period, -1, 0, -1);
-        }
-        log.info("[CANCEL-BILL] Billing run progress decremented.");
-
-        // Cascading Cancellation: Recursively cancel all parent accounts that depend on this child account
-        List<String> parentAccountIds = getParentAccountIds(maKhang);
-        for (String parentId : parentAccountIds) {
-            log.info("[CASCADING-CANCEL] Parent account '{}' depends on canceled child '{}'. Triggering cascading cancellation on parent...", parentId, maKhang);
-            try {
-                cancelBilling(parentId, month, period);
-            } catch (NoSuchElementException e) {
-                // If parent has not been calculated yet (status is not SUCCESS/FAILED), ignore
-                log.info("[CASCADING-CANCEL] Parent account '{}' has not been calculated yet. Skipping cancel command.", parentId);
-            }
         }
     }
 
@@ -1262,6 +1267,28 @@ public class BillingService {
         log.info("[LOCK-BOOK-BILL] Successfully locked {} accounts of Book: {} to {} for kỳ: {}, đợt: {}", 
             accountIds.size(), dtuongQly, targetStatus, month, period);
     }
+
+    public void cancelBookBilling(String dtuongQly, String month, int period) throws Exception {
+        log.info("[CANCEL-BOOK-BILL] Request to cancel all billing for Book: {}, Month: {}, Period: {}", 
+                dtuongQly, month, period);
+        List<String> accountIds = billingStateRepository.findCancelableAccountsForBook(dtuongQly, month, period);
+        if (accountIds.isEmpty()) {
+            log.info("[CANCEL-BOOK-BILL] No cancelable billing records found for Book: {}, Month: {}, Period: {}", 
+                    dtuongQly, month, period);
+            return;
+        }
+        int successCount = 0;
+        for (String maKhang : accountIds) {
+            try {
+                cancelBilling(maKhang, month, period, "SYSTEM", null, "KAFKA");
+                successCount++;
+            } catch (Exception e) {
+                log.error("[CANCEL-BOOK-BILL] Failed to cancel billing for Account: {} in Book: {}", maKhang, dtuongQly, e);
+            }
+        }
+        log.info("[CANCEL-BOOK-BILL] Successfully cancelled {} out of {} accounts of Book: {}", 
+                successCount, accountIds.size(), dtuongQly);
+    }
  
     private void checkAndTriggerAutoBatch(String dtuongQly, String month, int period) {
         try {
@@ -1299,8 +1326,7 @@ public class BillingService {
                     autoBatchEvent.put("period", period);
                     autoBatchEvent.put("timestamp", LocalDateTime.now().toString());
  
-                    // Publish to Kafka billing-auto-batch-topic
-                    kafkaTemplate.send("billing-auto-batch-topic", dtuongQly, objectMapper.writeValueAsString(autoBatchEvent));
+                    kafkaTemplate.send("billing-auto-batch-topic", dtuongQly, autoBatchEvent);
                 }
             }
         } catch (Exception e) {
@@ -1324,7 +1350,7 @@ public class BillingService {
         for (String accId : excluded) {
             try {
                 billingStateRepository.rejectAccountByCmis(accId, month, period, "CMIS Rejected this account during book approval.");
-                cancelBilling(accId, month, period);
+                cancelBilling(accId, month, period, "SYSTEM", "CMIS Rejected", "CMIS_REJECT");
                 String hashKey = "billing:book_status_hash:" + dtuongQly + ":" + month + ":" + period;
                 redisTemplate.opsForHash().put(hashKey, accId, "REJECTED_CMIS");
             } catch (Exception ex) {

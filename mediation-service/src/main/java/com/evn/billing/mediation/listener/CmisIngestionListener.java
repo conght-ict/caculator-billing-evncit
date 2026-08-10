@@ -96,7 +96,12 @@ public class CmisIngestionListener {
     @KafkaListener(
             topics = "meter-readings-input",
             groupId = "mediation-group",
-            containerFactory = "kafkaBatchListenerContainerFactory"
+            containerFactory = "kafkaBatchListenerContainerFactory",
+            properties = {
+                "value.deserializer=org.springframework.kafka.support.serializer.JsonDeserializer",
+                "spring.json.value.default.type=com.evn.billing.mediation.dto.CmisReadingEvent",
+                "spring.json.use.type.headers=false"
+            }
     )
     @Transactional
     public void listenCmisReadingBatch(
@@ -257,7 +262,7 @@ public class CmisIngestionListener {
                     validationError.put("timestamp", LocalDateTime.now().toString());
 
                     String validationErrorJson = objectMapper.writeValueAsString(validationError);
-                    kafkaTemplate.send("meter-reading-validation-results", event.getMaKhang(), validationErrorJson);
+                    kafkaTemplate.send("meter-reading-validation-results", event.getMaKhang(), validationError);
                     log.warn("[VALIDATION] Flagged anomalous reading for Account: {}, Status: {}, Reason: {}",
                             event.getMaKhang(), status, reason);
  

@@ -10,7 +10,7 @@ public class PriceApplicationRule {
     private int soThuTu; // so_thu_tu
     private BigDecimal dinhMuc; // dinh_muc
     private String loaiDmuc; // loai_dmuc (TL for percentage, SL for fixed consumption)
-    private String loaiBcs; // loai_bcs (e.g. KT)
+    // loaiBcs: REMOVED — luôn = tgianBdien, duplicate
     private String tgianBdien; // tgian_bdien (BT, CD, TD)
     private String maNgia; // ma_ngia
     private int soHo; // so_ho (normsFactor for stepping)

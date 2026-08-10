@@ -63,10 +63,12 @@ public class OnDemandBillingController {
         String maKhang = request.getMaKhang();
         String month = request.getThangChuKy();
         Integer period = request.getKyChot() != null ? request.getKyChot() : 1;
+        String nguoiHuy = request.getNguoiHuy() != null ? request.getNguoiHuy() : "REST_API_SYSTEM";
+        String lyDoHuy = request.getLyDoHuy();
 
-        log.info("[CANCEL-BILL-API] Received request to cancel billing for Account: {}, Month: {}, Period: {}", maKhang, month, period);
+        log.info("[CANCEL-BILL-API] Received request to cancel billing for Account: {}, Month: {}, Period: {}, Operator: {}", maKhang, month, period, nguoiHuy);
         try {
-            billingService.cancelBilling(maKhang, month, period);
+            billingService.cancelBilling(maKhang, month, period, nguoiHuy, lyDoHuy, "REST_API");
             log.info("[CANCEL-BILL-API] Successfully cancelled billing and evicted cache for Account: {}", maKhang);
             return ResponseEntity.ok("Billing calculation cancelled successfully. Status set to CANCELLED.");
         } catch (Exception e) {

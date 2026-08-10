@@ -584,7 +584,7 @@ public class OracleAmrIngestionJob {
                         validationError.put("endIndex", end);
                         validationError.put("timestamp", LocalDateTime.now().toString());
 
-                        kafkaTemplate.send("meter-reading-validation-results", target.maKhang, objectMapper.writeValueAsString(validationError));
+                        kafkaTemplate.send("meter-reading-validation-results", target.maKhang, validationError);
                     } catch (Exception e) {
                         log.error("Failed to publish validation error: {}", e.getMessage());
                     }

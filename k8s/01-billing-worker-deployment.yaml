@@ -7,7 +7,7 @@ metadata:
     app: billing-worker
     component: compute-core
 spec:
-  replicas: 4
+  replicas: 1
   selector:
     matchLabels:
       app: billing-worker

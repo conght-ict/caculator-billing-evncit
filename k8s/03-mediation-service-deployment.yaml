@@ -7,7 +7,7 @@ metadata:
     app: billing-mediation
     component: mediation
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels:
       app: billing-mediation

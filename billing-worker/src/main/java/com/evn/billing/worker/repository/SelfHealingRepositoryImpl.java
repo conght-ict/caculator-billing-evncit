@@ -45,7 +45,7 @@ public class SelfHealingRepositoryImpl implements SelfHealingRepository {
 
     @Override
     public void markRetryTaskFailed(Long taskId, String note) {
-        jdbcTemplate.update("UPDATE lich_xu_ly_lai SET trang_thai = 'FAILED', ghi_chu = ? WHERE id_nhiem_vu = ?", note, taskId);
+        jdbcTemplate.update("UPDATE lich_xu_ly_lai SET trang_thai = 'FAILED', loi_cuoi_cung = ? WHERE id_nhiem_vu = ?", note, taskId);
     }
 
     @Override

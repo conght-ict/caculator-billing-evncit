@@ -80,8 +80,7 @@ public class CmisScheduleListener {
                 cancelEvent.put("billingCycleMonth", month);
                 cancelEvent.put("period", period);
 
-                String json = objectMapper.writeValueAsString(cancelEvent);
-                kafkaTemplate.send("billing-operations-topic", maKhang, json);
+                kafkaTemplate.send("billing-operations-topic", maKhang, cancelEvent);
                 log.info("[SCHEDULE-KAFKA] Dispatched CANCEL_BILLING operation for account: {} returned to correction.", maKhang);
                 return;
             }

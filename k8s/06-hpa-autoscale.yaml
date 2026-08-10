@@ -8,8 +8,8 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: billing-worker
-  minReplicas: 4
-  maxReplicas: 16
+  minReplicas: 1
+  maxReplicas: 1
   metrics:
   - type: Resource
     resource:
@@ -47,8 +47,8 @@ spec:
     apiVersion: apps/v1
     kind: Deployment
     name: billing-mediation
-  minReplicas: 2
-  maxReplicas: 6
+  minReplicas: 1
+  maxReplicas: 1
   metrics:
   - type: Resource
     resource:

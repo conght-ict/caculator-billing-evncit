@@ -8,7 +8,9 @@ import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.stereotype.Component;
 import java.util.Map;
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
+import org.springframework.data.redis.core.ScanOptions;
 
 @Component
 public class ConfigCacheEvictionListener {
@@ -26,7 +28,8 @@ public class ConfigCacheEvictionListener {
      */
     @KafkaListener(
             topics = "config-sync-topic",
-            groupId = "config-cache-eviction-group"
+            groupId = "config-cache-eviction-group",
+            properties = "value.deserializer=org.apache.kafka.common.serialization.StringDeserializer"
     )
     public void listenConfigChangeEvents(String message) {
         log.info("[CACHE-EVICTION] Received config sync event: {}", message);
@@ -45,14 +48,29 @@ public class ConfigCacheEvictionListener {
                 log.info("[CACHE-EVICTION] Evicted snapshot cache for key: {} (Result: {})", cacheKey, deleted);
                 
             } else if ("TARIFF".equalsIgnoreCase(evictType) || "ALL".equalsIgnoreCase(evictType)) {
-                // Xóa toàn bộ snapshot cache để tránh sai cước khi biểu giá thay đổi
-                Set<String> keys = redisTemplate.keys("snapshot:*");
-                if (keys != null && !keys.isEmpty()) {
-                    Long count = redisTemplate.delete(keys);
-                    log.info("[CACHE-EVICTION] Evicted all snapshot config caches. Total keys cleared: {}", count);
-                } else {
-                    log.info("[CACHE-EVICTION] No snapshot caches to evict.");
+                // Xóa toàn bộ snapshot cache dùng SCAN (non-blocking)
+                long totalEvicted = 0L;
+                List<String> batchKeys = new ArrayList<>();
+                try {
+                    org.springframework.data.redis.core.Cursor<byte[]> rawCursor =
+                            redisTemplate.getConnectionFactory().getConnection().scan(
+                                    org.springframework.data.redis.core.ScanOptions.scanOptions()
+                                            .match("snapshot:*").count(200).build());
+                    while (rawCursor.hasNext()) {
+                        batchKeys.add(new String(rawCursor.next()));
+                        if (batchKeys.size() >= 200) {
+                            totalEvicted += redisTemplate.delete(batchKeys);
+                            batchKeys.clear();
+                        }
+                    }
+                    rawCursor.close();
+                } catch (Exception scanEx) {
+                    log.error("[CACHE-EVICTION] SCAN failed: {}", scanEx.getMessage());
                 }
+                if (!batchKeys.isEmpty()) {
+                    totalEvicted += redisTemplate.delete(batchKeys);
+                }
+                log.info("[CACHE-EVICTION] Evicted all snapshot config caches via SCAN. Total keys cleared: {}", totalEvicted);
             } else {
                 log.warn("[CACHE-EVICTION] Unknown eviction type: {}", evictType);
             }

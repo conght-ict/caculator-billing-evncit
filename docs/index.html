@@ -1998,16 +1998,16 @@
                                 <button class="ultima-btn-action" onclick="scrollToSimulatorBlock('sim-approval-card')">
                                     ✅ Hàng đợi phê duyệt
                                 </button>
-                                <button class="ultima-btn-action" onclick="resetSimulatorState()">
+                                <button class="ultima-btn-action" onclick="resetSimulatorState()" style="display: none;">
                                     🔄 Lấy danh sách (Làm mới)
                                 </button>
-                                <span style="margin-left: auto; font-size: 0.82rem; color:#616161;">Mã GCS Đang chọn:
+                                <span style="margin-left: auto; font-size: 0.82rem; color:#616161; display: none;">Mã GCS Đang chọn:
                                     <strong id="selected-gcs-display" style="color:#3F51B5;">--</strong></span>
                             </div>
 
                             <!-- Tabs on Page -->
                             <div
-                                style="display: flex; border-bottom: 2px solid #e0e0e0; background: #fff; padding: 0.5rem 0.5rem 0 0.5rem; border-radius: 4px 4px 0 0;">
+                                style="display: none; border-bottom: 2px solid #e0e0e0; background: #fff; padding: 0.5rem 0.5rem 0 0.5rem; border-radius: 4px 4px 0 0;">
                                 <div
                                     style="padding: 0.6rem 1.2rem; font-size: 0.85rem; font-weight: 700; color: #3F51B5; border-bottom: 3px solid #3F51B5; cursor: pointer;">
                                     Tính hóa đơn</div>
@@ -2018,7 +2018,7 @@
 
                             <!-- Filter Section (Ultima Card) -->
                             <div class="ultima-card"
-                                style="border-top: none; border-radius: 0 0 4px 4px; margin-bottom: 1rem; padding: 1rem 1.2rem;">
+                                style="display: none; border-top: none; border-radius: 0 0 4px 4px; margin-bottom: 1rem; padding: 1rem 1.2rem;">
                                 <div style="display: flex; gap: 1.5rem; align-items: flex-end;">
                                     <div class="ultima-filter-group" style="flex: 1; margin-bottom: 0;">
                                         <label class="ultima-filter-label">Chọn đối tượng quản lý TBA:</label>
@@ -2038,7 +2038,7 @@
                                 </div>
                             </div>
 
-                            <div class="ultima-card" style="margin-bottom: 1rem;">
+                            <div class="ultima-card" style="margin-bottom: 1rem; display: none;">
                                 <h4 class="ultima-card-title">Kết Nối API Prod-like</h4>
                                 <div
                                     style="display:grid; grid-template-columns: 2fr 1fr 1fr auto; gap:0.7rem; align-items:flex-end;">
@@ -2071,12 +2071,13 @@
                             <div class="ultima-card" style="margin-bottom: 1rem;">
                                 <div class="ultima-table-toolbar">
                                     <div style="display:flex; align-items:center; gap:0.5rem;">
-                                        🔍 <input type="text" placeholder="Tìm kiếm tất cả..." class="ultima-input"
-                                            style="width:200px; padding:0.35rem 0.6rem; font-size:0.8rem;">
+                                        🔍 <input type="text" id="sim-search-book" placeholder="Tìm mã ĐTQL..." class="ultima-input"
+                                            style="width:180px; padding:0.35rem 0.6rem; font-size:0.8rem;" oninput="simTableCurrentPage=1; renderSimTable();">
+                                        <button class="btn btn-outline" style="padding: 0.35rem 0.7rem; font-size: 0.8rem; display: inline-flex; align-items: center;" onclick="resetSimulatorState()">
+                                            🔄 Làm mới danh sách
+                                        </button>
                                     </div>
                                     <div style="display:flex; align-items:center; gap:0.8rem;">
-                                        <label class="ultima-checkbox-item" style="cursor: pointer;"><input
-                                                type="checkbox" style="accent-color:#3F51B5;"> Đảo chọn</label>
                                         <span id="sim-table-count">Tổng số: 0 bản ghi</span>
                                     </div>
                                 </div>
@@ -2084,8 +2085,6 @@
                                 <table class="ultima-table">
                                     <thead>
                                         <tr>
-                                            <th style="width: 30px;"><input type="checkbox"
-                                                    style="accent-color:#3F51B5;"></th>
                                             <th>Mã ĐTQL</th>
                                             <th>Tên đối tượng quản lý</th>
                                             <th style="color:#ef4444; text-align: center;">Đo xa lỗi (C1)</th>
@@ -2093,16 +2092,22 @@
                                             <th style="color:#8b5cf6; text-align: center;">Chờ tính HĐ (C1.5)</th>
                                             <th style="color:#f59e0b; text-align: center;">Bất thường (C2)</th>
                                             <th style="color:#10b981; text-align: center;">Thành công (C3)</th>
-                                            <th>Trạng thái sử dụng (Chốt cước)</th>
+                                            <th>Trạng thái sử dụng</th>
+                                            <th style="text-align: center;">Hành động</th>
                                         </tr>
                                     </thead>
                                     <tbody id="sim-table-body">
                                         <!-- Dynamic simulated rows -->
                                     </tbody>
                                 </table>
+                                <div id="sim-table-pagination" style="display:flex; justify-content:center; align-items:center; gap:0.5rem; margin-top:1rem;">
+                                    <button class="btn btn-outline" style="padding:0.3rem 0.6rem; font-size:0.8rem;" onclick="prevSimTablePage()">◀ Trang trước</button>
+                                    <span id="sim-table-page-info" style="font-size:0.82rem; font-weight:600; color:var(--text-secondary);">Trang 1 / 1</span>
+                                    <button class="btn btn-outline" style="padding:0.3rem 0.6rem; font-size:0.8rem;" onclick="nextSimTablePage()">Trang sau ▶</button>
+                                </div>
                             </div>
 
-                            <div class="ultima-card" id="sim-status-card" style="margin-bottom: 1rem;">
+                            <div class="ultima-card" id="sim-status-card" style="margin-bottom: 1rem; display: none;">
                                 <h4 class="ultima-card-title">Bảng Theo Dõi Trạng Thái Chốt Cước Theo Thời Gian Thực
                                 </h4>
                                 <div class="sim-kpi-grid">
@@ -2157,7 +2162,7 @@
                                 </div>
                             </div>
 
-                            <div class="sim-cmis-grid">
+                            <div class="sim-cmis-grid" style="display: none;">
                                 <div class="ultima-card" id="sim-approval-card" style="margin-bottom: 0;">
                                     <h4 class="ultima-card-title">Hàng Đợi Phê Duyệt Nghiệp Vụ (Cổng 1, 2, 3)</h4>
                                     <div style="font-size:0.8rem; color:#4b5563; margin-bottom:0.5rem;">Đang lọc theo
@@ -2227,7 +2232,7 @@
                                 </div>
                             </div>
 
-                            <div class="ultima-card" style="margin-top: 1rem; margin-bottom: 0;">
+                            <div class="ultima-card" style="margin-top: 1rem; margin-bottom: 0; display: none;">
                                 <h4 class="ultima-card-title">Nhật Ký Xử Lý Chi Tiết (Kafka + API + Quyết Định CMIS)
                                 </h4>
                                 <div
@@ -2264,7 +2269,7 @@
                         </div>
 
                         <!-- Terminal & Logs Section -->
-                        <div class="ultima-card" style="padding:0.8rem; background:#0f172a; border-color:#1e293b;">
+                        <div class="ultima-card" style="padding:0.8rem; background:#0f172a; border-color:#1e293b; display: none;">
                             <h4
                                 style="color:#fff; font-size:0.82rem; margin:0 0 0.5rem 0; font-weight:700; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #1e293b; padding-bottom:0.3rem;">
                                 <span>📥 Dòng Sự Kiện Kafka (Event Stream Broker)</span>
@@ -2314,6 +2319,97 @@
                             onclick="submitOperation()">Xác Nhận</button>
                         <button class="btn btn-outline" style="font-size:0.82rem; padding: 0.4rem 0.8rem;"
                             onclick="closeOperationPanel()">Hủy bỏ</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Dialog Chi tiết ĐTQL và Khách hàng (Sửa lỗi dài giao diện) -->
+            <div class="ultima-dialog-backdrop" id="book-detail-modal">
+                <div class="ultima-dialog" style="max-width: 1100px; width: 95%;">
+                    <div class="ultima-dialog-header" style="background: #3F51B5; color: white;">
+                        <span id="book-detail-title" style="font-weight: 700; font-size: 1.05rem;">📋 Chi tiết đối tượng quản lý</span>
+                        <button class="ultima-dialog-close" onclick="closeBookDetailModal()" style="color: white;">×</button>
+                    </div>
+                    <div class="ultima-dialog-body" style="display: flex; padding: 0; max-height: 600px; height: 600px;">
+                        <!-- Cột trái: Danh sách Khách hàng -->
+                        <div style="width: 380px; border-right: 1px solid #e0e0e0; display: flex; flex-direction: column; background: #f8fafc;">
+                            <div style="padding: 0.8rem; border-bottom: 1px solid #e0e0e0; display: flex; gap: 0.5rem; align-items: center;">
+                                <select id="book-detail-status-filter" class="ultima-input" style="padding: 0.35rem 0.5rem; font-size: 0.8rem; height: 32px; width: 150px;" onchange="bookDetailAccCurrentPage=1; filterBookDetailAccounts()">
+                                    <option value="ALL">Tất cả</option>
+                                    <option value="READING">Cổng 1 - Lỗi đo xa</option>
+                                    <option value="VERIFY">Cổng 1 - Lỗi chỉ số</option>
+                                    <option value="BILLING">Cổng 1.5 - Chờ tính</option>
+                                    <option value="ANOMALY">Cổng 2 - Bất thường</option>
+                                    <option value="SUCCESS">Cổng 3 - Thành công</option>
+                                </select>
+                                <input type="text" id="book-detail-search" class="ultima-input" placeholder="Tìm mã KH..." style="padding: 0.35rem 0.5rem; font-size: 0.8rem; height: 32px; flex-grow: 1;" oninput="bookDetailAccCurrentPage=1; filterBookDetailAccounts()">
+                            </div>
+                            <div style="flex-grow: 1; overflow-y: auto;" id="book-detail-accounts-list">
+                                <!-- Danh sách khách hàng render động -->
+                            </div>
+                            <div id="book-detail-accounts-pagination" style="padding: 0.5rem; border-top: 1px solid #e0e0e0; display: flex; justify-content: space-between; align-items: center; background: #fff; font-size: 0.75rem;">
+                                <button class="btn btn-outline" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;" onclick="prevBookDetailAccPage()">◀</button>
+                                <span id="book-detail-acc-page-info">Trang 1 / 1</span>
+                                <button class="btn btn-outline" style="padding: 0.2rem 0.4rem; font-size: 0.7rem;" onclick="nextBookDetailAccPage()">▶</button>
+                            </div>
+                        </div>
+                        
+                        <!-- Cột phải: Chi tiết Khách hàng đang chọn -->
+                        <div style="flex-grow: 1; display: flex; flex-direction: column; background: #fff; overflow: hidden;">
+                            <!-- Tab bar cho chi tiết khách hàng -->
+                            <div style="display: flex; border-bottom: 1px solid #e0e0e0; background: #f1f5f9; padding: 0.3rem 0.5rem 0 0.5rem;">
+                                <button class="sub-tab-btn active" id="acc-tab-btn-info" onclick="switchAccDetailTab('info')">Chỉ số &amp; Snapshot</button>
+                                <button class="sub-tab-btn" id="acc-tab-btn-invoice" onclick="switchAccDetailTab('invoice')">Hóa đơn &amp; Bậc thang</button>
+                                <button class="sub-tab-btn" id="acc-tab-btn-logs" onclick="switchAccDetailTab('logs')">Nhật ký &amp; Lỗi</button>
+                            </div>
+                            
+                            <div style="flex-grow: 1; padding: 1.2rem; overflow-y: auto;" id="book-detail-acc-content">
+                                <div style="text-align: center; color: #64748b; margin-top: 5rem;">
+                                    👉 Chọn một khách hàng ở danh sách bên trái để xem thông tin chi tiết.
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dialog Thao tác trên ĐTQL -->
+            <div class="ultima-dialog-backdrop" id="book-action-modal">
+                <div class="ultima-dialog" style="max-width: 500px;">
+                    <div class="ultima-dialog-header" style="background: #3F51B5; color: white;">
+                        <span id="book-action-title" style="font-weight: 700;">⚙️ Thao tác Đối tượng Quản lý</span>
+                        <button class="ultima-dialog-close" onclick="closeBookActionModal()" style="color: white;">×</button>
+                    </div>
+                    <div class="ultima-dialog-body" style="padding: 1.5rem;">
+                        <div style="margin-bottom: 1.2rem; font-size: 0.88rem; color: #374151; line-height: 1.5;">
+                            Mã đối tượng quản lý: <strong id="book-action-id-display" style="color: #3F51B5;">--</strong><br>
+                            Tên đối tượng quản lý: <span id="book-action-name-display">--</span>
+                        </div>
+                        
+                        <div style="display: flex; flex-direction: column; gap: 0.8rem;">
+                            <button class="ultima-btn-primary" style="justify-content: center; padding: 0.75rem;" onclick="runBookAction('CALCULATE')">
+                                ⚡ Chạy tính toán ĐTQL (Batch Run)
+                            </button>
+                            <button class="ultima-btn-primary" style="background: #10b981; justify-content: center; padding: 0.75rem;" onclick="runBookAction('LOCK')">
+                                🔒 Khóa sổ ĐTQL (Lock Accounts)
+                            </button>
+                            <button class="ultima-btn-primary" style="background: #ef4444; justify-content: center; padding: 0.75rem;" onclick="runBookAction('CANCEL')">
+                                🔄 Hủy sổ chốt cước ĐTQL
+                            </button>
+                            
+                            <div style="border-top: 1px solid #e5e7eb; margin-top: 0.5rem; padding-top: 0.8rem;">
+                                <label style="font-size: 0.8rem; font-weight: 600; color: #4b5563; display: block; margin-bottom: 0.3rem;">Ngày GCS (Định kỳ) để lập lịch:</label>
+                                <div style="display: flex; gap: 0.5rem;">
+                                    <input type="date" id="book-action-sched-date" class="ultima-input" value="2026-06-15" style="padding: 0.4rem; height: 32px;">
+                                    <button class="btn btn-outline" style="font-size: 0.8rem; font-weight: 700; height: 32px; display: inline-flex; align-items: center;" onclick="runBookAction('SCHEDULE')">
+                                        📅 Lập lịch GCS
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="ultima-dialog-footer">
+                        <button class="btn btn-outline" onclick="closeBookActionModal()">Đóng</button>
                     </div>
                 </div>
             </div>
@@ -4744,15 +4840,88 @@ public Job billingJob() { ... }`
             if (!snapshot) {
                 return '<div style="color:#6b7280; font-size:0.75rem;">Không có dữ liệu snapshot cấu hình.</div>';
             }
-            const config = snapshot.duLieuCauHinh || {};
+            let config = snapshot.duLieuCauHinh || {};
+            if (typeof config === 'string') {
+                try {
+                    config = JSON.parse(config);
+                } catch(e) {
+                    config = {};
+                }
+            }
+
+            // Render bieuGia
+            let bieuGiaHtml = '';
+            if (config.bieuGia && typeof config.bieuGia === 'object') {
+                bieuGiaHtml = '<div style="margin-top:0.6rem; border-top:1px solid #cbd5e1; padding-top:0.5rem;"><strong style="font-size:0.8rem; color:#3F51B5;">📋 Biểu giá áp dụng:</strong>';
+                for (const [tariffCode, rules] of Object.entries(config.bieuGia)) {
+                    let rulesHtml = '';
+                    if ((rules.loaiBieuGia === 'STEPPING' || rules.bacThang) && Array.isArray(rules.blocks)) {
+                        rulesHtml = `
+                            <table class="sim-mini-table" style="font-size:0.7rem; margin-top:0.25rem; width:100%; background:#fff;">
+                                <thead>
+                                    <tr style="background:#f1f5f9;">
+                                        <th>Bậc</th>
+                                        <th>Khoảng sản lượng (kWh)</th>
+                                        <th>Đơn giá áp dụng</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${rules.blocks.map(b => `
+                                        <tr>
+                                            <td>Bậc ${b.soThuTu}</td>
+                                            <td>${b.minKwh} - ${b.maxKwh !== null && b.maxKwh !== undefined ? b.maxKwh : 'Vô cùng'}</td>
+                                            <td style="font-weight:600; color:#1e293b;">${formatCurrency(b.donGia)}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        `;
+                    } else if (rules.loaiBieuGia === 'FLAT' || rules.donGiaPhang) {
+                        rulesHtml = `<div style="font-size:0.74rem; color:#475569; margin: 0.2rem 0;">Đơn giá phẳng: <strong>${formatCurrency(rules.donGiaPhang || rules.donGia)}</strong></div>`;
+                    } else if (rules.loaiBieuGia === 'TOU' && Array.isArray(rules.blocks)) {
+                        rulesHtml = `
+                            <table class="sim-mini-table" style="font-size:0.7rem; margin-top:0.25rem; width:100%; background:#fff;">
+                                <thead>
+                                    <tr style="background:#f1f5f9;">
+                                        <th>Khung giờ</th>
+                                        <th>Đơn giá</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${rules.blocks.map(b => `
+                                        <tr>
+                                            <td>${b.tgianBdien || '-'}</td>
+                                            <td style="font-weight:600;">${formatCurrency(b.donGia)}</td>
+                                        </tr>
+                                    `).join('')}
+                                </tbody>
+                            </table>
+                        `;
+                    }
+                    bieuGiaHtml += `
+                        <div style="margin-top:0.4rem; padding:0.4rem; background:#fff; border:1px solid #e2e8f0; border-radius:4px;">
+                            <div style="font-weight:700; font-size:0.76rem; color:#1f2937; margin-bottom:0.2rem;">Mã biểu giá: ${tariffCode} (${rules.loaiBieuGia || 'N/A'})</div>
+                            ${rulesHtml}
+                        </div>
+                    `;
+                }
+                bieuGiaHtml += '</div>';
+            }
+
             return `
-                <div style="background:#f1f5f9; padding:0.5rem; border-radius:4px; font-size:0.74rem; line-height:1.4; border:1px solid #cbd5e1; margin-bottom:0.5rem;">
-                    <div><strong>ID Snapshot:</strong> ${snapshot.idSnapshot || '-'}</div>
-                    <div><strong>Tên KH:</strong> ${config.tenKhang || '-'}</div>
-                    <div><strong>Loại KH:</strong> ${config.loaiKhangStr || '-'}</div>
-                    <div><strong>Số hộ định mức:</strong> ${config.soHo || 0}</div>
-                    <div><strong>Chu kỳ:</strong> ${config.tuNgay || '-'} đến ${config.denNgay || '-'}</div>
-                    <div><strong>Trạng thái:</strong> ${snapshot.trangThai || '-'}</div>
+                <div style="background:#f1f5f9; padding:0.8rem; border-radius:6px; font-size:0.76rem; line-height:1.5; border:1px solid #cbd5e1; margin-bottom:0.5rem; color:#334155;">
+                    <div><strong>ID Snapshot:</strong> <span style="font-family:monospace; font-weight:700;">${snapshot.idSnapshot || '-'}</span></div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.3rem; margin-top:0.4rem;">
+                        <div><strong>Khách hàng:</strong> ${config.tenKhang || '-'}</div>
+                        <div><strong>Mã KH:</strong> ${config.maKhang || '-'}</div>
+                        <div><strong>Số hộ định mức:</strong> <span style="color:#2563eb; font-weight:700;">${config.soHo || 1} hộ</span></div>
+                        <div><strong>Loại KH:</strong> ${config.loaiKhangStr || '-'}</div>
+                        <div><strong>Từ ngày:</strong> ${config.tuNgay || '-'}</div>
+                        <div><strong>Đến ngày:</strong> ${config.denNgay || '-'}</div>
+                        <div><strong>FastPath:</strong> <span class="badge ${config.fastPathEnabled ? 'badge-success' : 'badge-purple'}" style="font-size:0.68rem; padding:0.05rem 0.35rem;">${config.fastPathEnabled ? 'BẬT' : 'TẮT'}</span></div>
+                        <div><strong>Trạng thái:</strong> ${snapshot.trangThai || 'ACTIVE'}</div>
+                    </div>
+                    ${bieuGiaHtml}
                 </div>
             `;
         }
@@ -4765,11 +4934,80 @@ public Job billingJob() { ... }`
             if (invoice.banKeTinhToan) {
                 try {
                     const banKe = typeof invoice.banKeTinhToan === 'string' ? JSON.parse(invoice.banKeTinhToan) : invoice.banKeTinhToan;
-                    if (banKe && Array.isArray(banKe.lineItems)) {
+                    
+                    // 1. Cấu trúc mới từ Rating/Orchestrator manifest
+                    if (banKe && banKe.rating_breakdown && Array.isArray(banKe.rating_breakdown.steps_executed)) {
+                        const steps = banKe.rating_breakdown.steps_executed;
+                        const totalBeforeTax = banKe.rating_breakdown.total_before_tax || invoice.tongTienTruocThue || 0;
+                        const normsFactor = banKe.rating_breakdown.norms_factor || 1;
+                        
+                        // Đọc thông tin đo đếm
+                        let topologyHtml = '';
+                        if (banKe.topology_calculation && Array.isArray(banKe.topology_calculation.input_readings)) {
+                            topologyHtml = `
+                                <div style="margin-bottom:0.6rem; border-top:1px solid #bbf7d0; padding-top:0.5rem;">
+                                    <strong style="font-size:0.74rem; color:#15803d; display:block; margin-bottom:0.25rem;">📊 Thông số đo đếm &amp; Phân tích lưới:</strong>
+                                    <table class="sim-mini-table" style="font-size:0.7rem; background:#fff; width:100%;">
+                                        <thead>
+                                            <tr style="background:#f0fdf4;">
+                                                <th>Điểm đo</th>
+                                                <th>Chỉ số đầu - cuối</th>
+                                                <th>Sản lượng thô</th>
+                                                <th>Kiểu tính</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            ${banKe.topology_calculation.input_readings.map(ir => `
+                                                <tr>
+                                                    <td>${ir.meter_point_id || '-'}</td>
+                                                    <td>${ir.sub_readings && ir.sub_readings[0] ? (ir.sub_readings[0].start_index + ' - ' + ir.sub_readings[0].end_index) : '-'}</td>
+                                                    <td style="font-weight:600;">${ir.total_kwh || 0} kWh</td>
+                                                    <td>${ir.calculation_type || 'NORMAL'}</td>
+                                                </tr>
+                                            `).join('')}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            `;
+                        }
+
                         banKeHtml = `
-                            <table class="sim-mini-table" style="font-size:0.72rem; margin-top:0.3rem;">
+                            ${topologyHtml}
+                            <div style="margin-bottom:0.4rem; border-top:1px solid #bbf7d0; padding-top:0.5rem;">
+                                <strong style="font-size:0.74rem; color:#15803d;">⚡ Chi tiết phân bổ bậc thang (Định mức: ${normsFactor} hộ):</strong>
+                            </div>
+                            <table class="sim-mini-table" style="font-size:0.72rem; margin-top:0.3rem; background:#fff; width:100%;">
                                 <thead>
-                                    <tr>
+                                    <tr style="background:#e6fffa;">
+                                        <th>Tên bước / Bậc cước</th>
+                                        <th>Đơn giá bậc</th>
+                                        <th>Sản lượng phân bổ</th>
+                                        <th>Thành tiền (chưa VAT)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    ${steps.map(item => `
+                                        <tr>
+                                            <td><strong>${item.step || item.step_name || 'Bậc cước'}</strong><br><span style="font-size:0.65rem; color:#64748b;">Điểm đo: ${item.meter_point_id || '-'}</span></td>
+                                            <td style="font-weight:600;">${formatCurrency(item.unit_price || item.unitPrice || 0)}</td>
+                                            <td><span style="color:#2563eb; font-weight:700;">${item.kwh_consumed || item.kwh || 0}</span> kWh</td>
+                                            <td style="font-weight:700; color:#1e293b;">${formatCurrency(item.amount || 0)}</td>
+                                        </tr>
+                                    `).join('')}
+                                    <tr style="background:#f8fafc; font-weight:700;">
+                                        <td colspan="3" style="text-align:right;">Tổng tiền chưa thuế:</td>
+                                        <td>${formatCurrency(totalBeforeTax)}</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        `;
+                    }
+                    // 2. Cấu trúc cũ fallback
+                    else if (banKe && Array.isArray(banKe.lineItems)) {
+                        banKeHtml = `
+                            <table class="sim-mini-table" style="font-size:0.72rem; margin-top:0.3rem; background:#fff; width:100%;">
+                                <thead>
+                                    <tr style="background:#e6fffa;">
                                         <th>Bậc</th>
                                         <th>Đơn giá</th>
                                         <th>Sản lượng</th>
@@ -4780,9 +5018,9 @@ public Job billingJob() { ... }`
                                     ${banKe.lineItems.map(item => `
                                         <tr>
                                             <td>${item.label || item.stepName || '-'}</td>
-                                            <td>${formatCurrency(item.unitPrice || item.donGia)}</td>
+                                            <td style="font-weight:600;">${formatCurrency(item.unitPrice || item.donGia)}</td>
                                             <td>${item.consumption || item.sanLuong} kWh</td>
-                                            <td>${formatCurrency(item.amount || item.thanhTien)}</td>
+                                            <td style="font-weight:700;">${formatCurrency(item.amount || item.thanhTien)}</td>
                                         </tr>
                                     `).join('')}
                                 </tbody>
@@ -4794,12 +5032,18 @@ public Job billingJob() { ... }`
                 }
             }
             return `
-                <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:0.6rem; border-radius:6px; font-size:0.76rem; line-height:1.4;">
-                    <div><strong>Mã HĐ:</strong> ${invoice.idHoaDon || '-'}</div>
-                    <div><strong>Tiền trước thuế:</strong> <span style="color:#16a34a; font-weight:700;">${formatCurrency(invoice.tongTienTruocThue)}</span></div>
-                    <div><strong>Thuế VAT:</strong> ${formatCurrency(invoice.tienThue)}</div>
-                    <div><strong>Tổng tiền thanh toán:</strong> <span style="color:#15803d; font-weight:800; font-size:0.82rem;">${formatCurrency(invoice.tongTienSauThue)}</span></div>
+                <div style="background:#f0fdf4; border:1px solid #bbf7d0; padding:0.8rem; border-radius:8px; font-size:0.76rem; line-height:1.5; color:#1e293b;">
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.3rem; margin-bottom:0.6rem; border-bottom:1px dashed #bbf7d0; padding-bottom:0.5rem;">
+                        <div><strong>Mã HĐ:</strong> <span style="font-family:monospace; font-weight:700;">${invoice.idHoaDon || '-'}</span></div>
+                        <div><strong>Trạng thái:</strong> <span class="badge badge-success" style="font-size:0.68rem; padding:0.05rem 0.35rem;">${invoice.trangThai || 'FINAL'}</span></div>
+                        <div><strong>Tiền trước thuế:</strong> <span style="color:#16a34a; font-weight:700;">${formatCurrency(invoice.tongTienTruocThue)}</span></div>
+                        <div><strong>Tiền thuế:</strong> ${formatCurrency(invoice.tienThue)}</div>
+                    </div>
                     ${banKeHtml}
+                    <div style="margin-top:0.8rem; text-align:right; border-top:1px solid #bbf7d0; padding-top:0.5rem;">
+                        <strong style="font-size:0.84rem;">Tổng tiền thanh toán (sau thuế):</strong> 
+                        <span style="color:#15803d; font-weight:800; font-size:1.05rem; margin-left:0.5rem;">${formatCurrency(invoice.tongTienSauThue)}</span>
+                    </div>
                 </div>
             `;
         }
@@ -4976,6 +5220,28 @@ public Job billingJob() { ... }`
             renderEventLogTable();
         }
 
+        // Pagination & search variables for Book Table
+        let simTablePageSize = 5;
+        let simTableCurrentPage = 1;
+
+        function prevSimTablePage() {
+            if (simTableCurrentPage > 1) {
+                simTableCurrentPage--;
+                renderSimTable();
+            }
+        }
+
+        function nextSimTablePage() {
+            const bookIds = Object.keys(simData);
+            const filterText = (document.getElementById('sim-search-book') ? document.getElementById('sim-search-book').value : '').trim().toLowerCase();
+            const filtered = bookIds.filter(id => id.toLowerCase().includes(filterText) || (simData[id] && simData[id].name && simData[id].name.toLowerCase().includes(filterText)));
+            const totalPages = Math.max(1, Math.ceil(filtered.length / simTablePageSize));
+            if (simTableCurrentPage < totalPages) {
+                simTableCurrentPage++;
+                renderSimTable();
+            }
+        }
+
         function renderSimTable() {
             const tbody = document.getElementById('sim-table-body');
             if (!tbody) return;
@@ -4983,47 +5249,61 @@ public Job billingJob() { ... }`
 
             const bookIds = Object.keys(simData);
             if (bookIds.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color:#6b7280;">Chưa có dữ liệu từ API. Vui lòng bấm "Tải tiến trình".</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; color:#6b7280;">Chưa có dữ liệu từ API. Vui lòng bấm "Làm mới danh sách".</td></tr>';
                 const emptyCount = document.getElementById('sim-table-count');
                 if (emptyCount) emptyCount.innerText = 'Tổng số: 0 bản ghi';
                 return;
             }
 
-            let count = 0;
-            bookIds.sort().forEach(bookId => {
+            const filterText = (document.getElementById('sim-search-book') ? document.getElementById('sim-search-book').value : '').trim().toLowerCase();
+            const filtered = bookIds.sort().filter(id => id.toLowerCase().includes(filterText) || (simData[id] && simData[id].name && simData[id].name.toLowerCase().includes(filterText)));
+
+            const totalPages = Math.max(1, Math.ceil(filtered.length / simTablePageSize));
+            if (simTableCurrentPage > totalPages) simTableCurrentPage = totalPages;
+
+            const startIdx = (simTableCurrentPage - 1) * simTablePageSize;
+            const pageBookIds = filtered.slice(startIdx, startIdx + simTablePageSize);
+
+            pageBookIds.forEach(bookId => {
                 const book = simData[bookId];
                 ensureBookAccounts(bookId);
-                count++;
-                const tr = document.createElement('tr');
 
-                const readingsBadge = book.readingsError > 0 ? `<span class="badge badge-danger" style="cursor:pointer;" onclick="openGateModal('${bookId}', 'readings')">${book.readingsError} KH</span>` : `<span class="badge badge-success">0 KH</span>`;
-                const indexBadge = book.indexError > 0 ? `<span class="badge badge-warning" style="cursor:pointer;" onclick="openGateModal('${bookId}', 'index')">${book.indexError} KH</span>` : `<span class="badge badge-success">0 KH</span>`;
-                const waitingBadge = book.waitingCalc > 0 ? `<span class="badge badge-purple" style="background:rgba(139,92,246,0.2); cursor:pointer;" onclick="openGateModal('${bookId}', 'waiting')">${book.waitingCalc} KH</span>` : `<span class="badge badge-success">0 KH</span>`;
-                const anomalyBadge = book.anomalies > 0 ? `<span class="badge badge-warning" style="background:rgba(245,158,11,0.2); cursor:pointer;" onclick="openGateModal('${bookId}', 'anomaly')">${book.anomalies} KH</span>` : `<span class="badge badge-success">0 KH</span>`;
-                const successBadge = `<span class="badge badge-success" style="cursor:pointer;" onclick="openGateModal('${bookId}', 'success')">${book.success} KH</span>`;
+                const readingsBadge = `<span class="badge badge-danger" style="cursor:pointer;" onclick="openBookDetailModal('${bookId}', 'READING')">${book.readingsError} KH</span>`;
+                const indexBadge = `<span class="badge badge-warning" style="cursor:pointer;" onclick="openBookDetailModal('${bookId}', 'VERIFY')">${book.indexError} KH</span>`;
+                const waitingBadge = `<span class="badge badge-purple" style="background:rgba(139,92,246,0.2); cursor:pointer;" onclick="openBookDetailModal('${bookId}', 'BILLING')">${book.waitingCalc} KH</span>`;
+                const anomalyBadge = `<span class="badge badge-warning" style="background:rgba(245,158,11,0.2); cursor:pointer;" onclick="openBookDetailModal('${bookId}', 'ANOMALY')">${book.anomalies} KH</span>`;
+                const successBadge = `<span class="badge badge-success" style="cursor:pointer;" onclick="openBookDetailModal('${bookId}', 'SUCCESS')">${book.success} KH</span>`;
 
                 let statusBadge = '';
                 if (book.status === 'READY') statusBadge = `<span class="badge badge-purple">SẴN SÀNG</span>`;
                 else if (book.status === 'SUCCESS') statusBadge = `<span class="badge badge-success">HOÀN TẤT</span>`;
-                else if (book.status === 'LOCKED') statusBadge = `<span class="badge badge-purple" style="background:#3F51B5; color:white;">ĐÃ KHÓA (LOCKED)</span>`;
+                else if (book.status === 'LOCKED') statusBadge = `<span class="badge badge-purple" style="background:#3F51B5; color:white;">ĐÃ KHÓA</span>`;
                 else statusBadge = `<span class="badge badge-warning">ĐANG TÍNH</span>`;
 
+                const tr = document.createElement('tr');
                 tr.innerHTML = `
-                    <td><input type="checkbox" style="accent-color:#3F51B5;"></td>
                     <td><strong>${bookId}</strong></td>
-                    <td>${escapeHtml(book.name || ('Đối tượng quản lý ' + bookId))}</td>
+                    <td style="cursor:pointer; color:#3F51B5; font-weight:500;" onclick="openBookDetailModal('${bookId}', 'ALL')">${escapeHtml(book.name || ('Đối tượng quản lý ' + bookId))}</td>
                     <td style="text-align: center;">${readingsBadge}</td>
                     <td style="text-align: center;">${indexBadge}</td>
                     <td style="text-align: center;">${waitingBadge}</td>
                     <td style="text-align: center;">${anomalyBadge}</td>
                     <td style="text-align: center;">${successBadge}</td>
                     <td>${statusBadge}</td>
+                    <td style="text-align: center;">
+                        <button class="btn btn-primary" style="font-size:0.75rem; padding:0.2rem 0.5rem; background:#3F51B5; color:#fff;" onclick="openBookActionModal('${bookId}')">
+                            ⚙️ Thao tác
+                        </button>
+                    </td>
                 `;
                 tbody.appendChild(tr);
             });
 
             const countEl = document.getElementById('sim-table-count');
-            if (countEl) countEl.innerText = 'Tổng số: ' + count + ' bản ghi';
+            if (countEl) countEl.innerText = 'Tổng số: ' + filtered.length + ' bản ghi';
+
+            const pageInfo = document.getElementById('sim-table-page-info');
+            if (pageInfo) pageInfo.innerText = `Trang ${simTableCurrentPage} / ${totalPages}`;
         }
 
         function updateSimForm() {
@@ -5432,6 +5712,317 @@ public Job billingJob() { ... }`
             consoleLog('system', 'RESET_SIMULATOR_STATE', { status: 'READY', timestamp: new Date().toISOString() });
             addStatusTimeline('ALL', 'Reset Simulator', 'THÀNH CÔNG', 'Đã xóa cache UI và sẽ nạp lại dữ liệu từ API.');
             loadBooksCatalogFromApi(false).then(() => fetchAndSyncAllBooksFromApi(false));
+        }
+
+        // --- NEW DIALOG & TAB FUNCTIONS FOR CLEANER SIMULATOR INTERFACE ---
+        let bookDetailActiveBookId = '';
+        let bookDetailActiveStage = 'ALL';
+        let bookDetailAccPageSize = 10;
+        let bookDetailAccCurrentPage = 1;
+        let bookDetailSelectedAccountId = '';
+        let bookDetailActiveTab = 'info';
+
+        function openBookActionModal(bookId) {
+            const book = simData[bookId];
+            if (!book) return;
+            const modal = document.getElementById('book-action-modal');
+            if (modal) modal.classList.add('active');
+
+            const idDisplay = document.getElementById('book-action-id-display');
+            const nameDisplay = document.getElementById('book-action-name-display');
+            if (idDisplay) idDisplay.innerText = bookId;
+            if (nameDisplay) nameDisplay.innerText = book.name || ('Đối tượng quản lý ' + bookId);
+            
+            const dateInput = document.getElementById('book-action-sched-date');
+            if (dateInput) {
+                const now = new Date();
+                dateInput.value = now.toISOString().substring(0, 10);
+            }
+            
+            const selector = document.getElementById('sim-book-id');
+            if (selector) selector.value = bookId;
+        }
+
+        function closeBookActionModal() {
+            const modal = document.getElementById('book-action-modal');
+            if (modal) modal.classList.remove('active');
+        }
+
+        async function runBookAction(actionType) {
+            const selector = document.getElementById('sim-book-id');
+            const bookId = selector ? selector.value : '';
+            if (!bookId) return;
+
+            try {
+                if (actionType === 'CALCULATE') {
+                    const response = await sendBatchRunRequest(bookId);
+                    addStatusTimeline(bookId, 'Chạy tính hóa đơn', 'ĐÃ GỬI API', String(response || 'Batch run requested'));
+                    alert('Đã gửi yêu cầu chạy tính toán ĐTQL.');
+                } else if (actionType === 'LOCK') {
+                    await sendBillingOperation('LOCK_ACCOUNTS', bookId, null);
+                    addStatusTimeline(bookId, 'Khóa sổ', 'ĐÃ GỬI API', 'Đã gửi lệnh khóa sổ cho ' + bookId);
+                    alert('Đã gửi yêu cầu khóa sổ ĐTQL.');
+                } else if (actionType === 'CANCEL') {
+                    await sendBillingOperation('CANCEL_BILLING', bookId, null);
+                    addStatusTimeline(bookId, 'Hủy sổ', 'ĐÃ GỬI API', 'Đã gửi lệnh hủy sổ chốt cước cho ' + bookId);
+                    alert('Đã gửi yêu cầu hủy sổ chốt cước ĐTQL.');
+                } else if (actionType === 'SCHEDULE') {
+                    const date = document.getElementById('book-action-sched-date').value;
+                    const payload = {
+                        bookId,
+                        billingCycleMonth: date.substring(0, 7).replace('-', '_'),
+                        billingDate: date,
+                        status: 'ACTIVE'
+                    };
+                    consoleLog('cmis-schedules', 'SCHEDULE_CREATED', payload);
+                    addStatusTimeline(bookId, 'Lập lịch GCS', 'GHI NHẬN', 'Đã lập lịch GCS cho ngày ' + date);
+                    alert('Đã lập lịch ghi chỉ số cho ĐTQL.');
+                }
+                closeBookActionModal();
+                await fetchAndSyncCurrentBookFromApi(false);
+            } catch (error) {
+                alert('Thao tác thất bại: ' + error.message);
+            }
+        }
+
+        function openBookDetailModal(bookId, stage) {
+            bookDetailActiveBookId = bookId;
+            bookDetailActiveStage = stage || 'ALL';
+            bookDetailAccCurrentPage = 1;
+            bookDetailSelectedAccountId = '';
+            bookDetailActiveTab = 'info';
+            
+            const modal = document.getElementById('book-detail-modal');
+            if (modal) modal.classList.add('active');
+
+            const filterEl = document.getElementById('book-detail-status-filter');
+            if (filterEl) filterEl.value = bookDetailActiveStage;
+
+            const searchEl = document.getElementById('book-detail-search');
+            if (searchEl) searchEl.value = '';
+
+            const book = simData[bookId];
+            const titleEl = document.getElementById('book-detail-title');
+            if (titleEl) {
+                titleEl.innerText = `📋 Chi tiết ĐTQL: ${bookId} - ${book ? book.name : ''}`;
+            }
+
+            filterBookDetailAccounts();
+        }
+
+        function closeBookDetailModal() {
+            const modal = document.getElementById('book-detail-modal');
+            if (modal) modal.classList.remove('active');
+        }
+
+        function filterBookDetailAccounts() {
+            ensureBookAccounts(bookDetailActiveBookId);
+            const accounts = simAccountsStore[bookDetailActiveBookId] || [];
+            
+            const filterEl = document.getElementById('book-detail-status-filter');
+            const searchEl = document.getElementById('book-detail-search');
+            const stageFilter = filterEl ? filterEl.value : 'ALL';
+            const searchText = searchEl ? searchEl.value.trim().toLowerCase() : '';
+
+            let filtered = accounts;
+            if (stageFilter !== 'ALL') {
+                filtered = filtered.filter(acc => getFlowStageByStatus(acc.status) === stageFilter);
+            }
+            if (searchText) {
+                filtered = filtered.filter(acc => acc.accountId.toLowerCase().includes(searchText) || acc.customerName.toLowerCase().includes(searchText));
+            }
+
+            const totalPages = Math.max(1, Math.ceil(filtered.length / bookDetailAccPageSize));
+            if (bookDetailAccCurrentPage > totalPages) bookDetailAccCurrentPage = totalPages;
+
+            const startIdx = (bookDetailAccCurrentPage - 1) * bookDetailAccPageSize;
+            const pageAccounts = filtered.slice(startIdx, startIdx + bookDetailAccPageSize);
+
+            const listContainer = document.getElementById('book-detail-accounts-list');
+            if (!listContainer) return;
+
+            if (pageAccounts.length === 0) {
+                listContainer.innerHTML = '<div style="text-align:center; color:#64748b; padding:2rem; font-size: 0.85rem;">Không tìm thấy khách hàng nào.</div>';
+                document.getElementById('book-detail-acc-page-info').innerText = 'Trang 1 / 1';
+                return;
+            }
+
+            listContainer.innerHTML = pageAccounts.map(acc => {
+                const isActive = acc.accountId === bookDetailSelectedAccountId;
+                const activeStyle = isActive ? 'background: #eef2ff; border-left: 4px solid #3F51B5;' : 'border-left: 4px solid transparent;';
+                const stage = getFlowStageByStatus(acc.status);
+                let badgeClass = 'badge-success';
+                if (stage === 'READING') badgeClass = 'badge-danger';
+                else if (stage === 'VERIFY') badgeClass = 'badge-warning';
+                else if (stage === 'BILLING') badgeClass = 'badge-purple';
+                else if (stage === 'ANOMALY') badgeClass = 'badge-warning';
+
+                return `
+                    <div style="padding: 0.75rem; border-bottom: 1px solid #e2e8f0; cursor: pointer; display: flex; flex-direction: column; gap: 0.25rem; transition: background 0.2s; ${activeStyle}" onclick="selectBookDetailAccount('${acc.accountId}')">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-weight: 700; color: #1e293b; font-size: 0.82rem;">${acc.accountId}</span>
+                            <span class="badge ${badgeClass}" style="font-size: 0.7rem; padding: 0.1rem 0.35rem;">${getStatusLabel(acc.status)}</span>
+                        </div>
+                        <div style="font-size: 0.78rem; color: #475569; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${acc.customerName}</div>
+                        <div style="display: flex; justify-content: flex-end; margin-top: 0.2rem;">
+                            ${buildOperationButtonInDialog(bookDetailActiveBookId, acc)}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            document.getElementById('book-detail-acc-page-info').innerText = `Trang ${bookDetailAccCurrentPage} / ${totalPages}`;
+        }
+
+        function prevBookDetailAccPage() {
+            if (bookDetailAccCurrentPage > 1) {
+                bookDetailAccCurrentPage--;
+                filterBookDetailAccounts();
+            }
+        }
+
+        function nextBookDetailAccPage() {
+            ensureBookAccounts(bookDetailActiveBookId);
+            const accounts = simAccountsStore[bookDetailActiveBookId] || [];
+            const filterEl = document.getElementById('book-detail-status-filter');
+            const searchEl = document.getElementById('book-detail-search');
+            const stageFilter = filterEl ? filterEl.value : 'ALL';
+            const searchText = searchEl ? searchEl.value.trim().toLowerCase() : '';
+
+            let filtered = accounts;
+            if (stageFilter !== 'ALL') {
+                filtered = filtered.filter(acc => getFlowStageByStatus(acc.status) === stageFilter);
+            }
+            if (searchText) {
+                filtered = filtered.filter(acc => acc.accountId.toLowerCase().includes(searchText) || acc.customerName.toLowerCase().includes(searchText));
+            }
+
+            const totalPages = Math.max(1, Math.ceil(filtered.length / bookDetailAccPageSize));
+            if (bookDetailAccCurrentPage < totalPages) {
+                bookDetailAccCurrentPage++;
+                filterBookDetailAccounts();
+            }
+        }
+
+        function buildOperationButtonInDialog(bookId, account) {
+            const status = normalizeStatus(account.status);
+            if (status === 'READING_ERROR' || status === 'PENDING_MANUAL') {
+                return `<button class="btn btn-primary" style="font-size:0.7rem; padding:0.15rem 0.35rem; background:#ef4444; color:#fff;" onclick="event.stopPropagation(); openGateModal('${bookId}','readings','${account.accountId}')">Xử lý C1</button>`;
+            }
+            if (['INDEX_ERROR', 'SUSPECT', 'WARNING', 'INCOMPLETE'].includes(status)) {
+                return `<button class="btn btn-primary" style="font-size:0.7rem; padding:0.15rem 0.35rem; background:#f59e0b; color:#fff;" onclick="event.stopPropagation(); openGateModal('${bookId}','index','${account.accountId}')">Duyệt C1</button>`;
+            }
+            if (status === 'ANOMALY') {
+                return `<button class="btn btn-primary" style="font-size:0.7rem; padding:0.15rem 0.35rem; background:#f59e0b; color:#fff;" onclick="event.stopPropagation(); openGateModal('${bookId}','anomaly','${account.accountId}')">Duyệt C2</button>`;
+            }
+            if (['PENDING', 'PROCESSING', 'WAITING_CALC', 'FAILED', 'CANCELLED'].includes(status)) {
+                return `<button class="btn btn-primary" style="font-size:0.7rem; padding:0.15rem 0.35rem; background:#8b5cf6; color:#fff;" onclick="event.stopPropagation(); openGateModal('${bookId}','waiting','${account.accountId}')">Tính lại</button>`;
+            }
+            if (['SUCCESS', 'SUCCESS_CMIS', 'LOCKED', 'E_INVOICE_ISSUED', 'FINAL'].includes(status)) {
+                return `<button class="btn btn-primary" style="font-size:0.7rem; padding:0.15rem 0.35rem; background:#3F51B5; color:#fff;" onclick="event.stopPropagation(); openGateModal('${bookId}','success','${account.accountId}')">Khóa C3</button>`;
+            }
+            return '<span style="color:#94a3b8; font-size:0.7rem;">N/A</span>';
+        }
+
+        async function selectBookDetailAccount(accountId) {
+            bookDetailSelectedAccountId = accountId;
+            filterBookDetailAccounts();
+
+            const contentEl = document.getElementById('book-detail-acc-content');
+            if (!contentEl) return;
+            contentEl.innerHTML = '<div style="text-align:center; color:#64748b; margin-top:5rem;">Đang tải thông tin chi tiết khách hàng...</div>';
+
+            const bookId = bookDetailActiveBookId;
+            const account = (simAccountsStore[bookId] || []).find(a => a.accountId === accountId);
+            if (!account) return;
+
+            const cfg = readSimulatorApiConfig();
+            const detailPayload = { maKhang: accountId, thangChuKy: cfg.month, kyChot: cfg.period };
+            const logPayload = { dtuongQly: bookId, maKhang: accountId, limit: 30 };
+            const errPayload = { maKhang: accountId, thangChuKy: cfg.month, kyChot: cfg.period, limit: 20 };
+            const invoicePayload = { maKhang: accountId, thangChuKy: cfg.month, kyChot: cfg.period };
+
+            try {
+                const [detailRes, calcLogsRes, errorLogsRes, invoiceRes] = await Promise.allSettled([
+                    invokeApi('/api/v1/monitoring/detail', detailPayload, 'POST'),
+                    invokeApi('/api/v1/monitoring/logs', logPayload, 'POST'),
+                    invokeApi('/api/v1/monitoring/error-logs', errPayload, 'POST'),
+                    invokeApi('/api/v1/invoices', invoicePayload, 'POST')
+                ]);
+
+                const detail = detailRes.status === 'fulfilled' ? detailRes.value : null;
+                const calcLogs = calcLogsRes.status === 'fulfilled' ? calcLogsRes.value : [];
+                const errorLogs = errorLogsRes.status === 'fulfilled' ? errorLogsRes.value : [];
+                const invoice = invoiceRes.status === 'fulfilled' ? invoiceRes.value : (detail && detail.invoice ? detail.invoice : null);
+
+                window.activeAccountDetail = {
+                    account,
+                    detail,
+                    calcLogs,
+                    errorLogs,
+                    invoice
+                };
+
+                renderActiveAccountDetailTab();
+            } catch (error) {
+                contentEl.innerHTML = `<div style="color:#dc2626; padding:1rem;">Lỗi tải dữ liệu: ${escapeHtml(error.message)}</div>`;
+            }
+        }
+
+        function switchAccDetailTab(tabId) {
+            bookDetailActiveTab = tabId;
+            document.querySelectorAll('#book-detail-modal .sub-tab-btn').forEach(btn => btn.classList.remove('active'));
+            const activeBtn = document.getElementById('acc-tab-btn-' + tabId);
+            if (activeBtn) activeBtn.classList.add('active');
+            
+            renderActiveAccountDetailTab();
+        }
+
+        function renderActiveAccountDetailTab() {
+            const contentEl = document.getElementById('book-detail-acc-content');
+            if (!contentEl || !window.activeAccountDetail) return;
+
+            const { account, detail, calcLogs, errorLogs, invoice } = window.activeAccountDetail;
+            const tabId = bookDetailActiveTab;
+
+            if (tabId === 'info') {
+                contentEl.innerHTML = `
+                    <div style="font-weight:700; color:#1f2937; margin-bottom:0.8rem; font-size:0.95rem;">
+                        👤 Khách hàng: ${account.accountId} - ${account.customerName}
+                    </div>
+                    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.8rem; margin-bottom:1rem; font-size:0.82rem; background:#f8fafc; padding:0.8rem; border-radius:6px; border:1px solid #e2e8f0;">
+                        <div><strong>Mã đối tượng quản lý:</strong> ${bookDetailActiveBookId}</div>
+                        <div><strong>Tháng chốt / Kỳ chốt:</strong> ${readSimulatorApiConfig().month} / Kỳ ${readSimulatorApiConfig().period}</div>
+                        <div><strong>Trạng thái chốt cước:</strong> ${getStatusLabel(account.status)}</div>
+                        <div><strong>Mã hóa đơn:</strong> ${(invoice && invoice.idHoaDon) || account.invoiceId || '-'}</div>
+                    </div>
+                    
+                    <h5 style="font-size:0.85rem; font-weight:700; color:#3F51B5; margin:1.2rem 0 0.4rem 0;">📊 Dữ liệu chỉ số đo đếm</h5>
+                    ${renderReadingRows(detail && detail.readings ? detail.readings : [])}
+                    
+                    <h5 style="font-size:0.85rem; font-weight:700; color:#3F51B5; margin:1.2rem 0 0.4rem 0;">🔒 Snapshot cấu hình áp dụng</h5>
+                    ${renderSnapshotRows(detail && detail.snapshot ? detail.snapshot : null)}
+                `;
+            } else if (tabId === 'invoice') {
+                contentEl.innerHTML = `
+                    <div style="font-weight:700; color:#1f2937; margin-bottom:0.8rem; font-size:0.95rem;">
+                        🧾 Chi tiết hóa đơn: ${account.accountId}
+                    </div>
+                    ${renderInvoiceDetailRows(invoice)}
+                `;
+            } else if (tabId === 'logs') {
+                contentEl.innerHTML = `
+                    <div style="font-weight:700; color:#1f2937; margin-bottom:0.8rem; font-size:0.95rem;">
+                        📋 Nhật ký tính toán &amp; Lỗi hệ thống
+                    </div>
+                    
+                    <h5 style="font-size:0.85rem; font-weight:700; color:#3F51B5; margin:0 0 0.4rem 0;">⚙️ Nhật ký tiến trình tính toán (Calculation Logs)</h5>
+                    ${renderOpsLogsRows(Array.isArray(calcLogs) ? calcLogs : [])}
+                    
+                    <h5 style="font-size:0.85rem; font-weight:700; color:#dc2626; margin:1.2rem 0 0.4rem 0;">⚠️ Lịch sử lỗi phát hiện (Error Logs)</h5>
+                    ${renderErrorLogRows(Array.isArray(errorLogs) ? errorLogs : [])}
+                `;
+            }
         }
 
         function initializeCmisSimulator() {

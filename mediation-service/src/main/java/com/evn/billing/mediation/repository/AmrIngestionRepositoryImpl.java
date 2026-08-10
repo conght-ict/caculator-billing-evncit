@@ -119,7 +119,7 @@ public class AmrIngestionRepositoryImpl implements AmrIngestionRepository {
                     "VALUES (?, ?, ?, ?, 'PROCESSING', NOW()) " +
                     "ON CONFLICT (ma_khang, thang_chu_ky, ky_chot) DO UPDATE " +
                     "SET trang_thai = 'PROCESSING', dtuong_qly = EXCLUDED.dtuong_qly, thong_bao_loi = NULL, updated_at = NOW() " +
-                    "WHERE trang_thai_tinh_toan_kh.trang_thai IN ('FAILED', 'INCOMPLETE', 'PENDING_MANUAL', 'SUSPECT', 'WARNING', 'CANCELLED', 'PENDING')";
+                    "WHERE trang_thai_tinh_toan_kh.trang_thai IN ('FAILED', 'INCOMPLETE', 'PENDING_MANUAL', 'SUSPECT', 'WARNING', 'PENDING')";
             int rows = jdbcTemplate.update(sql, maKhang, month, dtuongQly, period);
             return rows > 0;
         } catch (Exception e) {
@@ -140,7 +140,7 @@ public class AmrIngestionRepositoryImpl implements AmrIngestionRepository {
     @Override
     public List<Map<String, Object>> getKh2tpPmaxStatus(String maKhang, String month, int period) {
         List<String> metersRequiringPmax = jdbcTemplate.queryForList(
-            "SELECT ma_ddo FROM diem_do WHERE ma_khang = ? AND EXISTS (SELECT 1 FROM jsonb_array_elements(thong_tin_cto) elem WHERE elem->'danh_sach_bcs' ? 'PMAX')",
+            "SELECT ma_ddo FROM diem_do WHERE ma_khang = ? AND EXISTS (SELECT 1 FROM jsonb_array_elements(thong_tin_cto) elem WHERE jsonb_exists(elem->'danh_sach_bcs', 'PMAX'))",
             String.class, maKhang
         );
         if (metersRequiringPmax.isEmpty()) {
@@ -168,7 +168,7 @@ public class AmrIngestionRepositoryImpl implements AmrIngestionRepository {
             return java.util.Collections.emptyList();
         } else {
             return jdbcTemplate.queryForList(
-                "SELECT d.ma_ddo FROM diem_do d WHERE d.ma_khang = ? AND EXISTS (SELECT 1 FROM jsonb_array_elements(d.thong_tin_cto) elem WHERE elem->'danh_sach_bcs' ? 'PMAX') " +
+                "SELECT d.ma_ddo FROM diem_do d WHERE d.ma_khang = ? AND EXISTS (SELECT 1 FROM jsonb_array_elements(d.thong_tin_cto) elem WHERE jsonb_exists(elem->'danh_sach_bcs', 'PMAX')) " +
                 "AND NOT EXISTS (SELECT 1 FROM chi_so_dien_nang c WHERE c.ma_ddo = d.ma_ddo " +
                 "AND c.thang_chu_ky = ? AND c.ky_chot = ? AND c.tgian_bdien = 'PMAX' AND c.trang_thai_xu_ly IN ('VALIDATED', 'PENDING_MANUAL'))",
                 maKhang, month, period

@@ -156,8 +156,7 @@ public class MonitoringService {
         }
 
         try {
-            String json = objectMapper.writeValueAsString(event);
-            kafkaTemplate.send("meter-reading-resolutions", maKhang, json);
+            kafkaTemplate.send("meter-reading-resolutions", maKhang, event);
             log.info("[RESOLVE-API] Sent resolution command: {} for Account: {}", resolutionType, maKhang);
         } catch (Exception e) {
             throw new RuntimeException("Failed to publish resolution event: " + e.getMessage(), e);
@@ -219,9 +218,8 @@ public class MonitoringService {
         event.put("period", finalPeriod);
 
         try {
-            String json = objectMapper.writeValueAsString(event);
             String partitionKey = maKhang != null ? maKhang : dtuongQly;
-            kafkaTemplate.send("billing-operations-topic", partitionKey, json);
+            kafkaTemplate.send("billing-operations-topic", partitionKey, event);
             log.info("[OPERATIONS-API] Sent billing operation command: {} for Account: {}, dtuongQly: {}", operationType, maKhang, dtuongQly);
         } catch (Exception e) {
             throw new RuntimeException("Failed to publish billing operation event: " + e.getMessage(), e);

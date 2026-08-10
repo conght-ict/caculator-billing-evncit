@@ -36,6 +36,13 @@ public interface BillingStateRepository {
     void batchInsertOutbox(List<Object[]> outboxBatch);
     void batchUpsertStatuses(List<Object[]> statusBatch);
 
+    /**
+     * Batch claim processing ownership cho toàn bộ danh sách account trong 1 SQL duy nhất.
+     * Thay thế N lần tryClaimProcessingWorker() riêng lẻ bằng 1 UPDATE duy nhất.
+     * @return danh sách ma_khang thực sự được claim thành công
+     */
+    List<String> batchClaimProcessingWorkers(List<String> maKhangs, String month, int period, String workerNodeId, int claimTimeoutMinutes);
+
     List<String> findParentAccountIds(String childAccountId);
     Map<String, Object> findStatusRowForUpdate(String maKhang, String month, int period);
     void updateAccountStatus(String targetStatus, String maKhang, String month, int period);
@@ -43,11 +50,15 @@ public interface BillingStateRepository {
     void markInvoicesCancelled(String maKhang, String month, int period);
     void setSnapshotsDraft(String maKhang, String month, int period);
     void markAccountCancelled(String maKhang, String month, int period, String message);
+    void insertCancelAuditLog(String maKhang, String month, int period,
+                              String trangThaiCu, String nguoiHuy,
+                              String lyDoHuy, String nguonHuy);
 
     int countValidatedReadings(String dtuongQly, String month, int period);
     int countByStatuses(String dtuongQly, String month, int period, List<String> statuses);
 
     List<String> findLockableAccountsForBook(String dtuongQly, String month, int period);
+    List<String> findCancelableAccountsForBook(String dtuongQly, String month, int period);
     void lockBookAccounts(String dtuongQly, String month, int period, String targetStatus);
 
     Integer countTotalAccounts(String dtuongQly, String month, int period);

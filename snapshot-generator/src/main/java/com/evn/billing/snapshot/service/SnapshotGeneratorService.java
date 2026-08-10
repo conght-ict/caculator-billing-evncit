@@ -137,12 +137,14 @@ public class SnapshotGeneratorService {
             // 2.1 Extract pricing rules from MeterPoints (JSONB)
             Map<String, List<PriceApplicationRule>> priceRulesByMeter = new HashMap<>();
             int maxHouseholds = 1;
-            int totalConfigs = 0;
-            int sh100Configs = 0;
-            int nsh100Configs = 0;
+            int shMeterCount = 0;
+            int nshMeterCount = 0;
+            int totalMetersWithConfig = 0;
 
             for (MeterPoint mp : meterPoints) {
-                if (mp.getDanhSachApGia() != null) {
+                if (mp.getDanhSachApGia() != null && !mp.getDanhSachApGia().isEmpty()) {
+                    boolean allSH = true;
+                    boolean allNSH = true;
                     for (TariffConfig tc : mp.getDanhSachApGia()) {
                         PriceApplicationRule rule = new PriceApplicationRule();
                         rule.setBbanId(mp.getMaDdo() + "_" + tc.getSoThuTu());
@@ -150,7 +152,6 @@ public class SnapshotGeneratorService {
                         rule.setSoThuTu(tc.getSoThuTu());
                         rule.setDinhMuc(tc.getDinhMuc());
                         rule.setLoaiDmuc(tc.getLoaiDmuc());
-                        rule.setLoaiBcs(tc.getTgianBdien());
                         rule.setTgianBdien(tc.getTgianBdien());
                         rule.setMaNgia(resolveTariffCode(tc.getMaNgia(), tc.getMaNhomnn(), tc.getMaCapda()));
                         rule.setSoHo(tc.getSoHo());
@@ -162,28 +163,27 @@ public class SnapshotGeneratorService {
                             maxHouseholds = tc.getSoHo();
                         }
 
-                        totalConfigs++;
                         String maNhomnn = tc.getMaNhomnn();
-                        String loaiDmuc = tc.getLoaiDmuc();
-                        BigDecimal dinhMuc = tc.getDinhMuc();
-
-                        boolean is100Percent = (loaiDmuc == null) || 
-                                (("TL".equals(loaiDmuc) || "%".equals(loaiDmuc)) && dinhMuc != null && dinhMuc.compareTo(BigDecimal.valueOf(100)) == 0);
-
-                        if (maNhomnn != null && maNhomnn.startsWith("SH") && is100Percent) {
-                            sh100Configs++;
-                        } else if ((maNhomnn == null || !maNhomnn.startsWith("SH")) && is100Percent) {
-                            nsh100Configs++;
+                        if (maNhomnn != null && maNhomnn.startsWith("SH")) {
+                            allNSH = false;
+                        } else {
+                            allSH = false;
                         }
+                    }
+                    totalMetersWithConfig++;
+                    if (allSH) {
+                        shMeterCount++;
+                    } else if (allNSH) {
+                        nshMeterCount++;
                     }
                 }
             }
 
             String customerType = "MIXED";
-            if (totalConfigs > 0) {
-                if (sh100Configs == totalConfigs) {
+            if (totalMetersWithConfig > 0) {
+                if (shMeterCount == totalMetersWithConfig) {
                     customerType = "SINH_HOAT";
-                } else if (nsh100Configs == totalConfigs) {
+                } else if (nshMeterCount == totalMetersWithConfig) {
                     customerType = "NGOAI_SINH_HOAT";
                 }
             }
@@ -206,7 +206,6 @@ public class SnapshotGeneratorService {
             // 4.1 Set Fast-Path flags
             boolean isFastPath = (meterPoints.size() == 1) && relations.isEmpty();
             config.setFastPathEnabled(isFastPath);
-            config.setHasRelation(!isFastPath);
             config.setChangeFlags("NONE");
             if (isFastPath) {
                 String singleMeterId = meterPoints.get(0).getMaDdo();
@@ -305,11 +304,13 @@ public class SnapshotGeneratorService {
             node.setMeterSerial(serial);
             
             List<PriceApplicationRule> rules = priceRulesByMeter.getOrDefault(mp.getMaDdo(), Collections.emptyList());
-            if (rules.isEmpty()) {
-                throw new IllegalStateException("No pricing rules config mapped for meter point: " + mp.getMaDdo());
-            }
             node.setPriceRules(rules);
-            node.setMaNgia(rules.get(0).getMaNgia());
+            if (!rules.isEmpty()) {
+                node.setMaNgia(rules.get(0).getMaNgia());
+            } else {
+                node.setMaNgia(null);
+                log.warn("[TOPOLOGY] MeterPoint {} has no pricing rules - will be aggregation-only in rating.", mp.getMaDdo());
+            }
 
             node.setChildPoints(new ArrayList<>());
             node.setCalculationType(CalculationType.AGGREGATION);
@@ -400,12 +401,9 @@ public class SnapshotGeneratorService {
         Map<String, TariffRules> tariffs = new HashMap<>();
         for (Tariff t : tariffsDb) {
             TariffRules rules = new TariffRules();
-            rules.setMaNgia(t.getMaNgia());
             rules.setLoaiBieuGia(t.getLoaiBieuGia());
             rules.setBacThang(t.isBacThang());
             rules.setDonGiaPhang(t.getDonGiaPhang());
-            rules.setNgayHieuLuc(t.getNgayHieuLuc());
-            rules.setNgayHetHan(t.getNgayHetHan());
             rules.setBlocks(t.getBlocks() != null ? t.getBlocks() : new ArrayList<>());
             tariffs.put(t.getMaNgia(), rules);
         }
@@ -533,12 +531,14 @@ public class SnapshotGeneratorService {
 
         Map<String, List<PriceApplicationRule>> priceRulesByMeter = new HashMap<>();
         int maxHouseholds = 1;
-        int totalConfigs = 0;
-        int sh100Configs = 0;
-        int nsh100Configs = 0;
+        int shMeterCount = 0;
+        int nshMeterCount = 0;
+        int totalMetersWithConfig = 0;
 
         for (MeterPoint mp : meterPoints) {
-            if (mp.getDanhSachApGia() != null) {
+            if (mp.getDanhSachApGia() != null && !mp.getDanhSachApGia().isEmpty()) {
+                boolean allSH = true;
+                boolean allNSH = true;
                 for (TariffConfig tc : mp.getDanhSachApGia()) {
                     PriceApplicationRule rule = new PriceApplicationRule();
                     rule.setBbanId(mp.getMaDdo() + "_" + tc.getSoThuTu());
@@ -546,7 +546,6 @@ public class SnapshotGeneratorService {
                     rule.setSoThuTu(tc.getSoThuTu());
                     rule.setDinhMuc(tc.getDinhMuc());
                     rule.setLoaiDmuc(tc.getLoaiDmuc());
-                    rule.setLoaiBcs(tc.getTgianBdien());
                     rule.setTgianBdien(tc.getTgianBdien());
                     rule.setMaNgia(resolveTariffCode(tc.getMaNgia(), tc.getMaNhomnn(), tc.getMaCapda()));
                     rule.setSoHo(tc.getSoHo());
@@ -558,28 +557,27 @@ public class SnapshotGeneratorService {
                         maxHouseholds = tc.getSoHo();
                     }
 
-                    totalConfigs++;
                     String maNhomnn = tc.getMaNhomnn();
-                    String loaiDmuc = tc.getLoaiDmuc();
-                    BigDecimal dinhMuc = tc.getDinhMuc();
-
-                    boolean is100Percent = (loaiDmuc == null) || 
-                            (("TL".equals(loaiDmuc) || "%".equals(loaiDmuc)) && dinhMuc != null && dinhMuc.compareTo(BigDecimal.valueOf(100)) == 0);
-
-                    if (maNhomnn != null && maNhomnn.startsWith("SH") && is100Percent) {
-                        sh100Configs++;
-                    } else if ((maNhomnn == null || !maNhomnn.startsWith("SH")) && is100Percent) {
-                        nsh100Configs++;
+                    if (maNhomnn != null && maNhomnn.startsWith("SH")) {
+                        allNSH = false;
+                    } else {
+                        allSH = false;
                     }
+                }
+                totalMetersWithConfig++;
+                if (allSH) {
+                    shMeterCount++;
+                } else if (allNSH) {
+                    nshMeterCount++;
                 }
             }
         }
 
         String customerType = "MIXED";
-        if (totalConfigs > 0) {
-            if (sh100Configs == totalConfigs) {
+        if (totalMetersWithConfig > 0) {
+            if (shMeterCount == totalMetersWithConfig) {
                 customerType = "SINH_HOAT";
-            } else if (nsh100Configs == totalConfigs) {
+            } else if (nshMeterCount == totalMetersWithConfig) {
                 customerType = "NGOAI_SINH_HOAT";
             }
         }
@@ -598,7 +596,6 @@ public class SnapshotGeneratorService {
 
         boolean isFastPath = (meterPoints.size() == 1) && relations.isEmpty();
         config.setFastPathEnabled(isFastPath);
-        config.setHasRelation(!isFastPath);
         if (isFastPath) {
             String singleMeterId = meterPoints.get(0).getMaDdo();
             config.setFastPathMaDdo(singleMeterId);

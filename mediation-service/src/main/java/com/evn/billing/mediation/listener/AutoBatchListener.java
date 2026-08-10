@@ -28,7 +28,8 @@ public class AutoBatchListener {
 
     @KafkaListener(
             topics = "billing-auto-batch-topic",
-            groupId = "auto-batch-trigger-group"
+            groupId = "auto-batch-trigger-group",
+            properties = "value.deserializer=org.apache.kafka.common.serialization.StringDeserializer"
     )
     public void listenAutoBatchTrigger(String message) {
         log.info("[AUTO-BATCH-KAFKA] Received auto-batch trigger event: {}", message);

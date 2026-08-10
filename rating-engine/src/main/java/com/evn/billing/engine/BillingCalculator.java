@@ -88,6 +88,34 @@ public class BillingCalculator {
             if (net == null) net = BigDecimal.ZERO;
 
             List<PriceApplicationRule> rules = node.getPriceRules();
+            
+            // FIX-DC-MAIN: Skip AGGREGATION-ONLY nodes (no priceRules and no maNgia)
+            if ((rules == null || rules.isEmpty()) && node.getMaNgia() == null) {
+                log.info("[RATING-SKIP] Node {} has no pricing rules (aggregation-only node), skipping rating. Net consumption = {} kWh.",
+                        node.getMaDdo(), net);
+                Map<String, Object> nodeBreakdown = new HashMap<>();
+                nodeBreakdown.put("meter_point_id", node.getMaDdo());
+                nodeBreakdown.put("net_consumption", net);
+                nodeBreakdown.put("amount", BigDecimal.ZERO);
+                nodeBreakdown.put("steps", Collections.emptyList());
+                nodeBreakdown.put("customer_case", "AGGREGATION_ONLY");
+                meterPointBreakdowns.put(node.getMaDdo(), nodeBreakdown);
+                continue;
+            }
+
+            if (isAggregationOnlyNode(node, consumptions)) {
+                log.info("[RATING-SKIP] Node {} is aggregation-only parent (net={} kWh from child). Skipping rating.",
+                        node.getMaDdo(), net);
+                Map<String, Object> nodeBreakdown = new HashMap<>();
+                nodeBreakdown.put("meter_point_id", node.getMaDdo());
+                nodeBreakdown.put("net_consumption", net);
+                nodeBreakdown.put("amount", BigDecimal.ZERO);
+                nodeBreakdown.put("steps", Collections.emptyList());
+                nodeBreakdown.put("customer_case", "AGGREGATION_ONLY");
+                meterPointBreakdowns.put(node.getMaDdo(), nodeBreakdown);
+                continue;
+            }
+
             if (rules == null || rules.isEmpty()) {
                 if (node.getMaNgia() == null) {
                     throw new IllegalArgumentException("No pricing rules or tariff code mapped for meter point: " + node.getMaDdo());
@@ -102,6 +130,9 @@ public class BillingCalculator {
                 defaultRule.setTgianBdien("BT");
                 rules = Collections.singletonList(defaultRule);
             }
+
+            // FIX-BCS-01: Deduplicate rules to avoid duplicate calculations of same tariff on full consumption
+            rules = deduplicateBcsRules(rules);
 
             String customerCase = classifyCustomerCase(node, rules, proRataFactor, config, net);
             log.info("MeterPointId: {} classified as customer case: {}", node.getMaDdo(), customerCase);
@@ -287,6 +318,9 @@ public class BillingCalculator {
             rules = Collections.singletonList(defaultRule);
         }
 
+        // FIX-BCS-01: Deduplicate rules to avoid duplicate calculations of same tariff on full consumption
+        rules = deduplicateBcsRules(rules);
+
         String customerCase = classifyCustomerCase(node, rules, proRataFactor, config, net);
         log.info("[FAST-PATH] MeterPointId: {} classified as customer case: {}", node.getMaDdo(), customerCase);
 
@@ -450,5 +484,30 @@ public class BillingCalculator {
                 return "NGOAI_SINH_HOAT_MIX_SHBT";
             }
         }
+    }
+
+    private boolean isAggregationOnlyNode(MeterPointNode node, Map<String, BigDecimal> consumptions) {
+        if (node.getChildPoints() == null || node.getChildPoints().isEmpty()) {
+            return false;
+        }
+        boolean hasNettingChild = node.getChildPoints().stream()
+            .anyMatch(c -> c.getCalculationType() == CalculationType.NETTING);
+        if (hasNettingChild) {
+            return false;
+        }
+        BigDecimal nodeRaw = consumptions.getOrDefault(node.getMaDdo(), BigDecimal.ZERO);
+        return nodeRaw.compareTo(BigDecimal.ZERO) <= 0;
+    }
+
+    private List<PriceApplicationRule> deduplicateBcsRules(List<PriceApplicationRule> rules) {
+        if (rules == null || rules.isEmpty()) {
+            return rules;
+        }
+        Map<String, PriceApplicationRule> deduped = new LinkedHashMap<>();
+        for (PriceApplicationRule r : rules) {
+            String key = r.getMaNgia() + "|" + r.getTgianBdien() + "|" + r.getLoaiDmuc();
+            deduped.putIfAbsent(key, r);
+        }
+        return new ArrayList<>(deduped.values());
     }
 }

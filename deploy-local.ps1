@@ -248,15 +248,15 @@ try {
     }
 
     Invoke-External -FilePath "kubectl" -Arguments @("apply", "-f", "k8s/05-ingress.yaml") -Description "Apply ingress"
-    Invoke-External -FilePath "kubectl" -Arguments @("apply", "-f", "k8s/06-hpa-autoscale.yaml") -Description "Apply HPA"
+    # Invoke-External -FilePath "kubectl" -Arguments @("apply", "-f", "k8s/06-hpa-autoscale.yaml") -Description "Apply HPA"
 
-    if (Test-Path "k8s/01b-keda-scaler.yaml") {
-        Write-Host "Dang apply KEDA scaler (optional)..." -ForegroundColor Yellow
-        & kubectl apply -f k8s/01b-keda-scaler.yaml 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "Canh bao: Apply KEDA scaler that bai. Co the KEDA chua duoc cai dat (CRD ScaledObject thieu). Bo qua vi day la tinh nang mo rong." -ForegroundColor DarkYellow
-        }
-    }
+    # if (Test-Path "k8s/01b-keda-scaler.yaml") {
+    #     Write-Host "Dang apply KEDA scaler (optional)..." -ForegroundColor Yellow
+    #     & kubectl apply -f k8s/01b-keda-scaler.yaml 2>$null
+    #     if ($LASTEXITCODE -ne 0) {
+    #         Write-Host "Canh bao: Apply KEDA scaler that bai. Co the KEDA chua duoc cai dat (CRD ScaledObject thieu). Bo qua vi day la tinh nang mo rong." -ForegroundColor DarkYellow
+    #     }
+    # }
 
     Write-Host "HOAN TAT CI/CD LOCAL: Da cap nhat thanh cong cac Pods & HPA Autoscalers!" -ForegroundColor Green
     kubectl get pods -n evn-billing

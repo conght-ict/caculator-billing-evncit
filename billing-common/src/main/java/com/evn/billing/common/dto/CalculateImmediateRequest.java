@@ -12,6 +12,6 @@ public class CalculateImmediateRequest {
     private String thangChuKy;
     private Integer kyChot = 1;
     private Integer phienBan = 1;
-    private String dtuongQly = "SO_DEMAND";
+    private String dtuongQly;
     private String triggeredBy = "CMIS";
 }

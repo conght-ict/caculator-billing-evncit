@@ -8,6 +8,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.DltHandler;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.annotation.RetryableTopic;
+import org.springframework.kafka.retrytopic.DltStrategy;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.kafka.support.KafkaHeaders;
@@ -28,8 +29,7 @@ public class BillingKafkaListener {
     private org.springframework.data.redis.core.StringRedisTemplate redisTemplate;
 
     /**
-     * Kafka Listener executing calculation tasks with Non-Blocking Retries.
-     * Uses 4 attempts with exponential backoff.
+     * Kafka Listener executing calculation tasks in batches.
      * Manual offset commits are performed only after successful database saving.
      */
     @KafkaListener(
@@ -101,28 +101,6 @@ public class BillingKafkaListener {
         }
     }
 
-    private void saveMetricsToRedis(long ingest, long queue, long calc, long e2e) {
-        try {
-            redisTemplate.opsForValue().increment("benchmark:total_latency_e2e", e2e);
-            redisTemplate.opsForValue().increment("benchmark:total_latency_ingest", ingest);
-            redisTemplate.opsForValue().increment("benchmark:total_latency_queue", queue);
-            redisTemplate.opsForValue().increment("benchmark:total_latency_calc", calc);
-            redisTemplate.opsForValue().increment("benchmark:total_count");
 
-            // Push to rolling queue (limit to latest 1000 records)
-            redisTemplate.opsForList().rightPush("benchmark:latencies:e2e", String.valueOf(e2e));
-            redisTemplate.opsForList().trim("benchmark:latencies:e2e", -1000, -1);
-        } catch (Exception e) {
-            log.warn("Failed to save metrics to Redis: {}", e.getMessage());
-        }
-    }
 
-    /**
-     * Handles tasks that have permanently failed all retry attempts.
-     */
-    @DltHandler
-    public void handleDlt(BillingTaskDto task, @Header(KafkaHeaders.RECEIVED_TOPIC) String topic) {
-        log.error("ALERT: Billing task permanently failed. Sent to DLT. Account: {}, Topic: {}", 
-                task.getMaKhang(), topic);
-    }
 }
