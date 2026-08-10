@@ -9,6 +9,9 @@ billing:
       enabled: false
   snapshot:
     url: ${SNAPSHOT_SERVICE_URL:http://localhost:8082/snapshot}
+    pre-gen-days: ${SNAPSHOT_PRE_GEN_DAYS:2}
+    recreate-topic: ${SNAPSHOT_RECREATE_TOPIC:snapshot-recreate-topic}
+
 
 spring:
   application:

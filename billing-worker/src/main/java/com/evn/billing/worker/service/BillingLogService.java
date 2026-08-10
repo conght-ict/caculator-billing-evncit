@@ -11,6 +11,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.transaction.annotation.Transactional;
+import java.sql.Timestamp;
 
 @Service
 @Transactional
@@ -24,33 +25,38 @@ public class BillingLogService {
     private final ConcurrentLinkedQueue<CalculationLogEntry> logQueue = new ConcurrentLinkedQueue<>();
 
     public static class CalculationLogEntry {
-        public UUID logId;
-        public String dtuongQly;
+        public String idHoaDon;
+        public String thangChuKy;
         public String maKhang;
-        public String billingCycleMonth;
-        public int period;
-        public String status;
-        public String inputData;
-        public String outputData;
-        public String errorMessage;
-        public java.sql.Timestamp createdAt;
+        public String trangThai;
+        public String duLieuDauVao;
+        public String ketQuaTinhToan;
+        public String thongBaoLoi;
+        public Long thoiGianXuLyMs;
+        public String tenWorker;
+        public Timestamp createdAt;
 
-        public CalculationLogEntry(String dtuongQly, String maKhang, String billingCycleMonth, int period, String status, String inputData, String outputData, String errorMessage) {
-            this.logId = UUID.randomUUID();
-            this.dtuongQly = dtuongQly;
+        public CalculationLogEntry(String idHoaDon, String thangChuKy, String maKhang, String trangThai,
+                                    String duLieuDauVao, String ketQuaTinhToan, String thongBaoLoi,
+                                    Long thoiGianXuLyMs, String tenWorker) {
+            this.idHoaDon = idHoaDon;
+            this.thangChuKy = thangChuKy;
             this.maKhang = maKhang;
-            this.billingCycleMonth = billingCycleMonth;
-            this.period = period;
-            this.status = status;
-            this.inputData = inputData;
-            this.outputData = outputData;
-            this.errorMessage = errorMessage;
-            this.createdAt = new java.sql.Timestamp(System.currentTimeMillis());
+            this.trangThai = trangThai;
+            this.duLieuDauVao = duLieuDauVao;
+            this.ketQuaTinhToan = ketQuaTinhToan;
+            this.thongBaoLoi = thongBaoLoi;
+            this.thoiGianXuLyMs = thoiGianXuLyMs;
+            this.tenWorker = tenWorker;
+            this.createdAt = new Timestamp(System.currentTimeMillis());
         }
     }
 
-    public void enqueueLog(String dtuongQly, String maKhang, String billingCycleMonth, int period, String status, String inputData, String outputData, String errorMessage) {
-        logQueue.offer(new CalculationLogEntry(dtuongQly, maKhang, billingCycleMonth, period, status, inputData, outputData, errorMessage));
+    public void enqueueLog(String idHoaDon, String thangChuKy, String maKhang, String trangThai,
+                           String duLieuDauVao, String ketQuaTinhToan, String thongBaoLoi,
+                           Long thoiGianXuLyMs, String tenWorker) {
+        logQueue.offer(new CalculationLogEntry(idHoaDon, thangChuKy, maKhang, trangThai,
+                duLieuDauVao, ketQuaTinhToan, thongBaoLoi, thoiGianXuLyMs, tenWorker));
     }
 
     @Scheduled(fixedDelay = 200)

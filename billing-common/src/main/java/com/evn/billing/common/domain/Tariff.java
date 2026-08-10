@@ -8,6 +8,7 @@ import org.hibernate.type.SqlTypes;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.math.BigDecimal;
 
 @Entity
 @Table(name = "bieu_gia")
@@ -40,7 +41,7 @@ public class Tariff {
     private boolean bacThang;
 
     @Column(name = "don_gia_phang")
-    private java.math.BigDecimal donGiaPhang;
+    private BigDecimal donGiaPhang;
 
     @Column(name = "ngay_hieu_luc", nullable = false)
     private LocalDate ngayHieuLuc;

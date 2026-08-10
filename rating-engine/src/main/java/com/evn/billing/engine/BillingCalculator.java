@@ -6,10 +6,15 @@ import com.evn.billing.engine.variant.VariantRegistry;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.*;
+import java.time.LocalDate;
+import java.time.YearMonth;
+import java.time.temporal.ChronoUnit;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class BillingCalculator {
 
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(BillingCalculator.class);
+    private static final Logger log = LoggerFactory.getLogger(BillingCalculator.class);
     private final TopologyCalculator topologyCalculator = new TopologyCalculator();
 
     /**
@@ -19,12 +24,12 @@ public class BillingCalculator {
     public CalculationResult calculate(BillingConfigSnapshot config, Map<String, BigDecimal> consumptions) throws Exception {
         String month = "2026_06";
         if (config.getDenNgay() != null) {
-            java.time.LocalDate toDate = config.getDenNgay();
+            LocalDate toDate = config.getDenNgay();
             month = String.format("%d_%02d", toDate.getYear(), toDate.getMonthValue());
         }
         long days = 30;
         if (config.getTuNgay() != null && config.getDenNgay() != null) {
-            days = java.time.temporal.ChronoUnit.DAYS.between(config.getTuNgay(), config.getDenNgay()) + 1;
+            days = ChronoUnit.DAYS.between(config.getTuNgay(), config.getDenNgay()) + 1;
             if (days <= 0) days = 30;
         }
         return calculate(config, consumptions, month, days);
@@ -56,7 +61,7 @@ public class BillingCalculator {
                 String[] parts = billingCycleMonth.split("_");
                 int year = Integer.parseInt(parts[0]);
                 int monthVal = Integer.parseInt(parts[1]);
-                java.time.YearMonth yearMonth = java.time.YearMonth.of(year, monthVal);
+                YearMonth yearMonth = YearMonth.of(year, monthVal);
                 int daysInMonth = yearMonth.lengthOfMonth();
                 if (daysUsed < daysInMonth && daysUsed > 0) {
                     proRataFactor = BigDecimal.valueOf(daysUsed).divide(BigDecimal.valueOf(daysInMonth), 8, RoundingMode.HALF_UP);
@@ -278,7 +283,7 @@ public class BillingCalculator {
                 String[] parts = billingCycleMonth.split("_");
                 int year = Integer.parseInt(parts[0]);
                 int monthVal = Integer.parseInt(parts[1]);
-                java.time.YearMonth yearMonth = java.time.YearMonth.of(year, monthVal);
+                YearMonth yearMonth = YearMonth.of(year, monthVal);
                 int daysInMonth = yearMonth.lengthOfMonth();
                 if (daysUsed < daysInMonth && daysUsed > 0) {
                     proRataFactor = BigDecimal.valueOf(daysUsed).divide(BigDecimal.valueOf(daysInMonth), 8, RoundingMode.HALF_UP);

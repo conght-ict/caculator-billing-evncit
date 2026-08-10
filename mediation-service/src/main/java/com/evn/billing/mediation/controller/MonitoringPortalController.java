@@ -15,6 +15,8 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 import java.util.List;
 import java.util.Map;
+import java.util.Collections;
+import org.springframework.batch.core.JobExecution;
 
 @RestController
 @RequestMapping("/api/v1/monitoring")
@@ -98,7 +100,7 @@ public class MonitoringPortalController {
         try {
             return ResponseEntity.ok(monitoringService.getBatchExecutions());
         } catch (Exception e) {
-            return ResponseEntity.ok(java.util.Collections.emptyList());
+            return ResponseEntity.ok(Collections.emptyList());
         }
     }
 
@@ -107,7 +109,7 @@ public class MonitoringPortalController {
         try {
             return ResponseEntity.ok(monitoringService.getBookBillingRuns());
         } catch (Exception e) {
-            return ResponseEntity.ok(java.util.Collections.emptyList());
+            return ResponseEntity.ok(Collections.emptyList());
         }
     }
 
@@ -142,7 +144,7 @@ public class MonitoringPortalController {
         }
 
         try {
-            org.springframework.batch.core.JobExecution execution = batchService.launchBillingJob(dtuongQly, month, period, version);
+            JobExecution execution = batchService.launchBillingJob(dtuongQly, month, period, version);
             return ResponseEntity.ok("Batch job initiated via Mediation Service. Execution ID: " + execution.getId() + ", Status: " + execution.getStatus());
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)

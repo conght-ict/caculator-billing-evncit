@@ -2,6 +2,7 @@ package com.evn.billing.worker.service;
 
 import com.evn.billing.common.dto.BillingTaskDto;
 import com.evn.billing.worker.repository.SelfHealingRepository;
+import com.evn.billing.worker.repository.BillInvoiceRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,9 +12,11 @@ import org.springframework.stereotype.Service;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import java.sql.Timestamp;
 import java.time.LocalDateTime;
+import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 @Slf4j
@@ -26,7 +29,7 @@ public class SelfHealingService {
     private SelfHealingRepository selfHealingRepository;
  
     @Autowired
-    private com.evn.billing.worker.repository.BillInvoiceRepository billInvoiceRepository;
+    private BillInvoiceRepository billInvoiceRepository;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -54,7 +57,7 @@ public class SelfHealingService {
                 ProducerRecord<String, Object> retryRecord =
                         new ProducerRecord<>(RETRY_TOPIC, task.getMaKhang(), task);
                 retryRecord.headers().add("notBefore",
-                        java.nio.ByteBuffer.allocate(8).putLong(notBefore).array());
+                        ByteBuffer.allocate(8).putLong(notBefore).array());
                 kafkaTemplate.send(retryRecord);
                 log.info("[SELF-HEALING] Dispatched task to Retry Queue (Attempt {}/{}, notBefore={}s) for Account: {}",
                         attempts + 1, MAX_RETRY_ATTEMPTS, delayMs / 1000, task.getMaKhang());
@@ -147,7 +150,7 @@ public class SelfHealingService {
                 int nextVersion = (int) billInvoiceRepository.countByMaKhangAndThangChuKyAndKyChot(maKhang, month, period) + 1;
                 taskDto.setPhienBanTinh(nextVersion);
                 taskDto.setTriggeredBy("SELF_HEALING");
-                taskDto.setTraceId(java.util.UUID.randomUUID().toString().replace("-", ""));
+                taskDto.setTraceId(UUID.randomUUID().toString().replace("-", ""));
                 taskDto.setDanhSachChiSo(new ArrayList<>()); // Readings will be re-fetched by worker from DB
 
                 kafkaTemplate.send(EXECUTION_TOPIC, maKhang, taskDto);

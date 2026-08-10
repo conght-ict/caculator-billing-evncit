@@ -17,7 +17,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.messaging.handler.annotation.Header;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +25,14 @@ import java.time.LocalDate;
 import java.util.*;
 import java.nio.ByteBuffer;
 import java.math.BigDecimal;
+import java.sql.Date;
+import java.sql.Timestamp;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.header.Header;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.kafka.support.serializer.JsonDeserializer;
 
 @Component
 public class CmisIngestionListener {
@@ -45,7 +52,7 @@ public class CmisIngestionListener {
     private ObjectMapper objectMapper;
 
     @Autowired
-    private org.springframework.data.redis.core.StringRedisTemplate redisTemplate;
+    private StringRedisTemplate redisTemplate;
 
     @Autowired
     private com.evn.billing.mediation.repository.AmrIngestionRepository amrIngestionRepository;
@@ -80,7 +87,7 @@ public class CmisIngestionListener {
             if (snapshotOpt.isPresent()) {
                 config = snapshotOpt.get().getDuLieuCauHinh();
                 try {
-                    redisTemplate.opsForValue().set(cacheKey, objectMapper.writeValueAsString(config), 24, java.util.concurrent.TimeUnit.HOURS);
+                    redisTemplate.opsForValue().set(cacheKey, objectMapper.writeValueAsString(config), 24, TimeUnit.HOURS);
                 } catch (Exception e) {
                     // Ignore
                 }
@@ -98,14 +105,14 @@ public class CmisIngestionListener {
             groupId = "mediation-group",
             containerFactory = "kafkaBatchListenerContainerFactory",
             properties = {
-                "value.deserializer=org.springframework.kafka.support.serializer.JsonDeserializer",
+                "value.deserializer=JsonDeserializer",
                 "spring.json.value.default.type=com.evn.billing.mediation.dto.CmisReadingEvent",
                 "spring.json.use.type.headers=false"
             }
     )
     @Transactional
     public void listenCmisReadingBatch(
-            java.util.List<org.apache.kafka.clients.consumer.ConsumerRecord<String, CmisReadingEvent>> records) {
+            List<ConsumerRecord<String, CmisReadingEvent>> records) {
         if (records == null || records.isEmpty()) return;
         
         log.info("Mediation batch listener received size: {}", records.size());
@@ -118,7 +125,7 @@ public class CmisIngestionListener {
 
         List<Object[]> meterUsageBatch = new ArrayList<>();
         
-        for (org.apache.kafka.clients.consumer.ConsumerRecord<String, CmisReadingEvent> record : records) {
+        for (ConsumerRecord<String, CmisReadingEvent> record : records) {
             CmisReadingEvent event = record.value();
             if (event == null) continue;
 
@@ -213,8 +220,8 @@ public class CmisIngestionListener {
                             Map<String, Object> sched = schedules.get(0);
                             LocalDate denNgay = null;
                             Object denNgayObj = sched.get("den_ngay");
-                            if (denNgayObj instanceof java.sql.Date) {
-                                denNgay = ((java.sql.Date) denNgayObj).toLocalDate();
+                            if (denNgayObj instanceof Date) {
+                                denNgay = ((Date) denNgayObj).toLocalDate();
                             } else if (denNgayObj instanceof LocalDate) {
                                 denNgay = (LocalDate) denNgayObj;
                             }
@@ -292,8 +299,8 @@ public class CmisIngestionListener {
                 event.getMaDdo(),
                 month,
                 period,
-                java.sql.Timestamp.valueOf(fromDate),
-                java.sql.Timestamp.valueOf(toDate),
+                Timestamp.valueOf(fromDate),
+                Timestamp.valueOf(toDate),
                 event.getChiSoDau(),
                 event.getChiSoCuoi(),
                 isRollover,
@@ -313,7 +320,7 @@ public class CmisIngestionListener {
         }
 
         // 2. Perform completeness check and trigger calculation task only for final billing index readings
-        for (org.apache.kafka.clients.consumer.ConsumerRecord<String, CmisReadingEvent> record : records) {
+        for (ConsumerRecord<String, CmisReadingEvent> record : records) {
             CmisReadingEvent event = record.value();
             if (event == null) continue;
 
@@ -342,7 +349,7 @@ public class CmisIngestionListener {
 
             if (isBillingReading) {
                 long t1Ingest = System.currentTimeMillis();
-                org.apache.kafka.common.header.Header h = record.headers().lastHeader("t1_ingest");
+                Header h = record.headers().lastHeader("t1_ingest");
                 if (h != null) {
                     try {
                         t1Ingest = ByteBuffer.wrap(h.value()).getLong();
@@ -573,14 +580,14 @@ public class CmisIngestionListener {
     }
 
     public Map<String, BillingConfigSnapshot> batchLoadConfigs(
-            List<org.apache.kafka.clients.consumer.ConsumerRecord<String, CmisReadingEvent>> records) {
+            List<ConsumerRecord<String, CmisReadingEvent>> records) {
         
         Map<String, BillingConfigSnapshot> cache = new HashMap<>();
         if (records == null || records.isEmpty()) return cache;
 
         // Group unique accounts by month and period
         Map<String, Set<String>> groupToAccounts = new HashMap<>(); // key: "month:period" -> set of accountIds
-        for (org.apache.kafka.clients.consumer.ConsumerRecord<String, CmisReadingEvent> record : records) {
+        for (ConsumerRecord<String, CmisReadingEvent> record : records) {
             CmisReadingEvent event = record.value();
             if (event == null) continue;
 
@@ -678,7 +685,7 @@ public class CmisIngestionListener {
                     redisTemplate.opsForValue().multiSet(redisMSet);
                     // Set expiration for each key in batch
                     for (String key : redisMSet.keySet()) {
-                        redisTemplate.expire(key, 24, java.util.concurrent.TimeUnit.HOURS);
+                        redisTemplate.expire(key, 24, TimeUnit.HOURS);
                     }
                 } catch (Exception e) {
                     // Ignore

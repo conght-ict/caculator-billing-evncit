@@ -8,4 +8,5 @@ import java.util.List;
 @Repository
 public interface MeterPointRepository extends JpaRepository<MeterPoint, String> {
     List<MeterPoint> findByMaKhangAndTrangThai(String maKhang, String trangThai);
+    List<MeterPoint> findByDtuongQlyAndTrangThai(String dtuongQly, String trangThai);
 }

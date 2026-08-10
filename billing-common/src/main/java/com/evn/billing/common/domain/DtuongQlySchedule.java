@@ -61,6 +61,12 @@ public class DtuongQlySchedule {
     @Column(name = "ma_dviqly", length = 20, nullable = false)
     private String maDviqly = "PD0600";
 
+    @Column(name = "snapshot_generated", nullable = false)
+    private Boolean snapshotGenerated = false;
+
+    @Column(name = "snapshot_generated_at")
+    private LocalDateTime snapshotGeneratedAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt = LocalDateTime.now();
 

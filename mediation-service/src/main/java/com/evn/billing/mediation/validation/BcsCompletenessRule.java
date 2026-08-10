@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import java.util.*;
+import java.time.LocalDate;
 
 @Component
 @Order(10)
@@ -31,7 +32,7 @@ public class BcsCompletenessRule implements ValidationRule {
             }
         }
         
-        java.time.LocalDate targetDate = ((java.sql.Date) denNgay).toLocalDate();
+        LocalDate targetDate = ((java.sql.Date) denNgay).toLocalDate();
 
         List<Map<String, Object>> received = validationQueryRepository.findValidatedReadings(maKhang, month, period);
 
@@ -75,14 +76,14 @@ public class BcsCompletenessRule implements ValidationRule {
                 String ctoStatus = (String) cto.get("trang_thai");
                 String ngayTreoStr = (String) cto.get("ngay_treo");
                 String ngayThaoStr = (String) cto.get("ngay_thao");
-                java.time.LocalDate ngayTreo = ngayTreoStr != null ? java.time.LocalDate.parse(ngayTreoStr) : null;
-                java.time.LocalDate ngayThao = ngayThaoStr != null ? java.time.LocalDate.parse(ngayThaoStr) : null;
+                LocalDate ngayTreo = ngayTreoStr != null ? LocalDate.parse(ngayTreoStr) : null;
+                LocalDate ngayThao = ngayThaoStr != null ? LocalDate.parse(ngayThaoStr) : null;
 
                 boolean isActive = false;
                 if ("ACTIVE".equalsIgnoreCase(ctoStatus)) {
                     isActive = true;
                 } else {
-                    java.time.LocalDate periodStart = targetDate.minusDays(30);
+                    LocalDate periodStart = targetDate.minusDays(30);
                     if (ngayThao != null && !ngayThao.isBefore(periodStart)) {
                         isActive = true;
                     }
@@ -115,7 +116,7 @@ public class BcsCompletenessRule implements ValidationRule {
             return;
         }
 
-        java.time.LocalDate targetDate = config.getDenNgay();
+        LocalDate targetDate = config.getDenNgay();
         if (targetDate == null) {
             throw new IllegalStateException("Snapshot configuration is missing periodToDate for account: " + config.getMaKhang());
         }
@@ -142,7 +143,7 @@ public class BcsCompletenessRule implements ValidationRule {
         }
     }
 
-    private void checkNodeCompleteness(com.evn.billing.common.dto.MeterPointNode node, java.time.LocalDate targetDate, Set<String> receivedKeys, ValidationResult result) {
+    private void checkNodeCompleteness(com.evn.billing.common.dto.MeterPointNode node, LocalDate targetDate, Set<String> receivedKeys, ValidationResult result) {
         String meterPointId = node.getMaDdo();
         Short loaiDdoShort = node.getLoaiDdo();
         int loaiDdo = loaiDdoShort != null ? loaiDdoShort.intValue() : 1;
@@ -164,14 +165,14 @@ public class BcsCompletenessRule implements ValidationRule {
 
         for (com.evn.billing.common.dto.MeterDetails cto : meterList) {
             String ctoStatus = cto.getTrangThai();
-            java.time.LocalDate ngayTreo = cto.getNgayTreo();
-            java.time.LocalDate ngayThao = cto.getNgayThao();
+            LocalDate ngayTreo = cto.getNgayTreo();
+            LocalDate ngayThao = cto.getNgayThao();
 
             boolean isActive = false;
             if ("ACTIVE".equalsIgnoreCase(ctoStatus)) {
                 isActive = true;
             } else {
-                java.time.LocalDate periodStart = targetDate.minusDays(30);
+                LocalDate periodStart = targetDate.minusDays(30);
                 if (ngayThao != null && !ngayThao.isBefore(periodStart)) {
                     isActive = true;
                 }

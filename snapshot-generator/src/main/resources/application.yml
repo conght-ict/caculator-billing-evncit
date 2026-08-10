@@ -45,6 +45,18 @@ spring:
     virtual:
       enabled: true
 
+  kafka:
+    bootstrap-servers: ${KAFKA_SERVERS:localhost:9092}
+    consumer:
+      group-id: snapshot-pregen-group
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      auto-offset-reset: earliest
+      properties:
+        max.poll.interval.ms: 300000
+        session.timeout.ms: 60000
+
+
 management:
   endpoints:
     web:
@@ -58,6 +70,7 @@ management:
 billing:
   snapshot:
     default-tariff: "TARIFF_SHBT_2023"
+    tariff-version-date: ${TARIFF_VERSION_DATE:20250510}
     grace-periods:
       "R-01": 3
       "R-02": 1

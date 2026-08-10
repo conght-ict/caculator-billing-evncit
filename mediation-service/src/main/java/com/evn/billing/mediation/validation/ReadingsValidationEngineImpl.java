@@ -5,6 +5,9 @@ import org.springframework.stereotype.Service;
 import com.evn.billing.common.dto.BillingConfigSnapshot;
 import com.evn.billing.common.domain.MeterUsage;
 import java.util.List;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import java.util.concurrent.TimeUnit;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 @Service
 public class ReadingsValidationEngineImpl implements ReadingsValidationEngine {
@@ -19,10 +22,10 @@ public class ReadingsValidationEngineImpl implements ReadingsValidationEngine {
     private com.evn.billing.mediation.repository.MeterUsageRepository meterUsageRepository;
 
     @Autowired
-    private org.springframework.data.redis.core.StringRedisTemplate redisTemplate;
+    private StringRedisTemplate redisTemplate;
 
     @Autowired
-    private com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private ObjectMapper objectMapper;
 
     @Override
     public ValidationResult validate(String maKhang, String month, int period) {
@@ -55,7 +58,7 @@ public class ReadingsValidationEngineImpl implements ReadingsValidationEngine {
         if (snapshotOpt.isPresent()) {
             BillingConfigSnapshot config = snapshotOpt.get().getDuLieuCauHinh();
             try {
-                redisTemplate.opsForValue().set(cacheKey, objectMapper.writeValueAsString(config), 24, java.util.concurrent.TimeUnit.HOURS);
+                redisTemplate.opsForValue().set(cacheKey, objectMapper.writeValueAsString(config), 24, TimeUnit.HOURS);
             } catch (Exception e) {
                 // Ignore
             }

@@ -6,35 +6,29 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import com.evn.billing.common.domain.BillInvoice;
+
 public interface BillingStateRepository {
     int tryClaimProcessingWorker(String workerNodeId, String maKhang, String month, int period, int claimTimeoutMinutes);
     void seedProcessingStatus(String maKhang, String month, String dtuongQly, int period, String workerNode);
     int updateProcessingStatus(String status, String invoiceId, String errorMsg, Long durationMs, String workerNode, String dtuongQly, String maKhang, String month, int period);
     void updateBookBillingRunProgress(String dtuongQly, String month, int period, int processedDelta, int successDelta, int failedDelta);
 
-    void upsertInvoice(
-            String invoiceId,
-            String maKhang,
-            String dtuongQly,
-            String month,
-            BigDecimal totalBeforeTax,
-            BigDecimal taxAmount,
-            BigDecimal totalAfterTax,
-            String idempotencyKey,
-            String manifestJson,
-            boolean isProrated,
-            String refSnapshot,
-            String status,
-            String maDviqly,
-            Timestamp createdAt,
-            Timestamp updatedAt);
+    void upsertInvoice(BillInvoice invoice);
 
     void lockSnapshot(String maKhang, String month, int period, int version);
     void insertOutboxEvent(UUID eventId, String aggregateType, String aggregateId, String eventType, String payloadJson, Timestamp createdAt);
 
-    void batchUpsertInvoices(List<Object[]> invoiceBatch);
+    void batchUpsertInvoices(List<BillInvoice> invoiceBatch);
     void batchInsertOutbox(List<Object[]> outboxBatch);
     void batchUpsertStatuses(List<Object[]> statusBatch);
+
+    void insertNhatKyTinhToan(String idHoaDon, String thangChuKy, String maKhang,
+                              String trangThai, String duLieuDauVao, String ketQua,
+                              String loi, Long durationMs, String tenWorker);
+
+    void updateCmisIdMapping(String idHoaDon, String thangChuKy, Long cmisIdHdon,
+                              String chiTietDiemDoJson, String syncStatus);
 
     /**
      * Batch claim processing ownership cho toàn bộ danh sách account trong 1 SQL duy nhất.

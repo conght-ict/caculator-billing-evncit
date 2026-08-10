@@ -1,6 +1,8 @@
 package com.evn.billing.mediation.repository;
 
 import java.util.List;
+import java.math.BigDecimal;
+import java.util.Map;
 
 public interface CmisSyncRepository {
     void upsertCustomer(String maKhang, String tenKhang, String trangThai, String diaChi, String dienThoai, String email, String maSoThue, String maDviqly);
@@ -9,7 +11,7 @@ public interface CmisSyncRepository {
     void upsertMeterRelation(String maDdoCha, String maDdoCon, String loaiQuanHe, String ngayHieuLuc, String ngayHetHan);
     void deleteMeterRelation(String maDdoCha, String maDdoCon);
     void upsertTariff(String maBieuGia, String tenBieuGia, String loaiBieuGia, String ngayHieuLuc, String ngayHetHan, String quyetDinhPhapLy, String trangThai, String chiTietGiaJson,
-                      String maNhomnn, String khoang_da, String maNgiaCmis, String thoigianBdien, boolean bacThang, java.math.BigDecimal donGiaPhang);
+                      String maNhomnn, String khoang_da, String maNgiaCmis, String thoigianBdien, boolean bacThang, BigDecimal donGiaPhang);
     List<String> findAccountsByTariff(String maBieuGia);
     String findDtuongQlyByKhang(String maKhang);
     String findCurrentCto(String maDdo);
@@ -17,5 +19,9 @@ public interface CmisSyncRepository {
     void updateThongTinCto(String maDdo, String thongTinCtoStr);
     void upsertMeterPointSchedule(String maDdo, String month, int period, String fromDate, String toDate, String status);
     void upsertDtuongQlySchedule(String dtuongQly, String month, int period, String fromDate, String toDate, int nMinus, int nPlus, int totalAccounts, String maDviqly);
-    java.util.Map<String, Object> findActiveBookSchedule(String dtuongQly);
+    Map<String, Object> findActiveBookSchedule(String dtuongQly);
+    List<Map<String, Object>> findActiveBookSchedules(String dtuongQly);
+    List<Map<String, Object>> findBooksWithUpcomingMeterReadings(int daysAhead);
+    List<Map<String, Object>> findBooksByTariff(String maBieuGia);
 }
+

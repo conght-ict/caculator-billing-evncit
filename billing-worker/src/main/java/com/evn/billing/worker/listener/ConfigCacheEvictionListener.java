@@ -11,6 +11,8 @@ import java.util.Map;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.data.redis.core.ScanOptions;
+import org.apache.kafka.common.serialization.StringDeserializer;
+import org.springframework.data.redis.core.Cursor;
 
 @Component
 public class ConfigCacheEvictionListener {
@@ -29,7 +31,7 @@ public class ConfigCacheEvictionListener {
     @KafkaListener(
             topics = "config-sync-topic",
             groupId = "config-cache-eviction-group",
-            properties = "value.deserializer=org.apache.kafka.common.serialization.StringDeserializer"
+            properties = "value.deserializer=StringDeserializer"
     )
     public void listenConfigChangeEvents(String message) {
         log.info("[CACHE-EVICTION] Received config sync event: {}", message);
@@ -52,9 +54,9 @@ public class ConfigCacheEvictionListener {
                 long totalEvicted = 0L;
                 List<String> batchKeys = new ArrayList<>();
                 try {
-                    org.springframework.data.redis.core.Cursor<byte[]> rawCursor =
+                    Cursor<byte[]> rawCursor =
                             redisTemplate.getConnectionFactory().getConnection().scan(
-                                    org.springframework.data.redis.core.ScanOptions.scanOptions()
+                                    ScanOptions.scanOptions()
                                             .match("snapshot:*").count(200).build());
                     while (rawCursor.hasNext()) {
                         batchKeys.add(new String(rawCursor.next()));

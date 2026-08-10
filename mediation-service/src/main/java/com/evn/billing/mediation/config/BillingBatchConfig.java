@@ -27,6 +27,12 @@ import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.transaction.PlatformTransactionManager;
 import java.util.Map;
 import java.util.UUID;
+import java.util.HashMap;
+import java.util.List;
+import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 
 @Configuration
 public class BillingBatchConfig {
@@ -44,7 +50,7 @@ public class BillingBatchConfig {
     private com.evn.billing.mediation.repository.BillInvoiceRepository billInvoiceRepository;
 
     @Autowired
-    @org.springframework.context.annotation.Lazy
+    @Lazy
     private CmisIngestionListener cmisIngestionListener;
 
     /**
@@ -57,7 +63,7 @@ public class BillingBatchConfig {
             @Value("#{jobParameters['month']}") String month,
             @Value("#{jobParameters['period']}") Long period) {
         
-        org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(BillingBatchConfig.class);
+        Logger log = LoggerFactory.getLogger(BillingBatchConfig.class);
         log.info("Initializing accountReader with dtuongQly: {}, month: {}, period: {}, entityManagerFactory: {}", 
                  dtuongQly, month, period, entityManagerFactory);
                  
@@ -73,7 +79,7 @@ public class BillingBatchConfig {
 
         int effectivePeriod = period != null ? period.intValue() : 1;
         
-        Map<String, Object> paramValues = new java.util.HashMap<>();
+        Map<String, Object> paramValues = new HashMap<>();
         paramValues.put("dtuongQly", dtuongQly);
         paramValues.put("month", month);
         paramValues.put("period", effectivePeriod);
@@ -105,10 +111,10 @@ public class BillingBatchConfig {
             int effectivePeriod = period != null ? period.intValue() : 1;
             int nextVersion = (int) billInvoiceRepository.countByMaKhangAndThangChuKyAndKyChot(account.getMaKhang(), month, effectivePeriod) + 1;
             
-            java.util.List<com.evn.billing.common.domain.MeterUsage> validatedUsages = meterUsageRepository
+            List<com.evn.billing.common.domain.MeterUsage> validatedUsages = meterUsageRepository
                     .findByMaKhangAndThangChuKyAndKyChotAndTrangThaiXuLy(account.getMaKhang(), month, effectivePeriod, "VALIDATED");
             
-            java.util.List<MeterReadingDto> readings = validatedUsages.stream()
+            List<MeterReadingDto> readings = validatedUsages.stream()
                     .map(u -> new MeterReadingDto(
                             u.getMaDdo(),
                             u.getTuNgay(),
@@ -124,7 +130,7 @@ public class BillingBatchConfig {
                             u.getSoLanQuayVong(),
                             u.getTgianBdien()
                     ))
-                    .collect(java.util.stream.Collectors.toList());
+                    .collect(Collectors.toList());
                     
             BillingTaskDto task = new BillingTaskDto(
                     account.getMaKhang(),

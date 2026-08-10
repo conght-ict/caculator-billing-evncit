@@ -9,10 +9,15 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.web.client.RestTemplate;
+import com.evn.billing.mediation.service.SnapshotEventPublisher;
 
 import java.util.List;
 import java.util.Map;
+import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 @Slf4j
@@ -21,8 +26,10 @@ public class CmisTariffListener {
     @Autowired
     private CmisSyncRepository cmisSyncRepository;
 
+    @Autowired
+    private SnapshotEventPublisher snapshotEventPublisher;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final RestTemplate restTemplate = new RestTemplate();
 
     @KafkaListener(
             topics = "cmis-bieu-gia",
@@ -53,10 +60,10 @@ public class CmisTariffListener {
                 String quyetDinhPhapLy = (String) duLieu.get("quyet_dinh_phap_ly");
                 String trangThai = (String) duLieu.getOrDefault("trang_thai", "ACTIVE");
                 List<Map<String, Object>> chiTietGia = (List<Map<String, Object>>) duLieu.get("chi_tiet_gia");
-                List<Map<String, Object>> chiTietGiaViet = new java.util.ArrayList<>();
+                List<Map<String, Object>> chiTietGiaViet = new ArrayList<>();
                 if (chiTietGia != null) {
                     for (Map<String, Object> block : chiTietGia) {
-                        Map<String, Object> blockViet = new java.util.LinkedHashMap<>();
+                        Map<String, Object> blockViet = new LinkedHashMap<>();
                         blockViet.put("soThuTu", block.get("step"));
                         blockViet.put("minKwh", block.get("minKwh"));
                         blockViet.put("maxKwh", block.get("maxKwh"));
@@ -73,7 +80,7 @@ public class CmisTariffListener {
                 String maNgiaCmis = "A";
                 String thoigianBdien = "KT";
                 boolean bacThang = false;
-                java.math.BigDecimal donGiaPhang = null;
+                BigDecimal donGiaPhang = null;
 
                 if (maBieuGia != null && maBieuGia.startsWith("TARIFF_")) {
                     String[] parts = maBieuGia.split("_");
@@ -101,9 +108,9 @@ public class CmisTariffListener {
 
                     if ("FLAT".equalsIgnoreCase(loaiBieuGia) && chiTietGiaJson != null) {
                         try {
-                            java.util.regex.Matcher m = java.util.regex.Pattern.compile("\"donGia\"\\s*:\\s*([\\d\\.]+)").matcher(chiTietGiaJson);
+                            Matcher m = Pattern.compile("\"donGia\"\\s*:\\s*([\\d\\.]+)").matcher(chiTietGiaJson);
                             if (m.find()) {
-                                donGiaPhang = new java.math.BigDecimal(m.group(1));
+                                donGiaPhang = new BigDecimal(m.group(1));
                             }
                         } catch (Exception e) {
                             // Ignore
@@ -141,41 +148,19 @@ public class CmisTariffListener {
 
     private void executeBatchSnapshotRefresh(String maBieuGia) {
         try {
-            List<String> affectedAccounts = cmisSyncRepository.findAccountsByTariff(maBieuGia);
-            
-            if (affectedAccounts.isEmpty()) {
-                log.info("[CMIS-SYNC] No active accounts affected by tariff: {}", maBieuGia);
+            List<Map<String, Object>> affectedBooks = cmisSyncRepository.findBooksByTariff(maBieuGia);
+            if (affectedBooks.isEmpty()) {
+                log.info("[CMIS-SYNC] No active books affected by tariff: {}", maBieuGia);
                 return;
             }
 
-            log.info("[CMIS-SYNC] Found {} accounts affected by tariff: {}. Triggering snapshot updates...", affectedAccounts.size(), maBieuGia);
+            log.info("[CMIS-SYNC] Found {} books affected by tariff: {}. Triggering book-level snapshot updates...", affectedBooks.size(), maBieuGia);
 
-            for (String maKhang : affectedAccounts) {
-                String dtuongQly = cmisSyncRepository.findDtuongQlyByKhang(maKhang);
-                if (dtuongQly == null) {
-                    log.warn("[CMIS-SYNC] No management object found for account: {}. Skipping snapshot refresh.", maKhang);
-                    continue;
-                }
-
-                String month = null;
-                Integer period = null;
-                Map<String, Object> schedule = cmisSyncRepository.findActiveBookSchedule(dtuongQly);
-                if (schedule != null) {
-                    month = (String) schedule.get("thang_ck");
-                    period = ((Number) schedule.get("ky_chot")).intValue();
-                } else {
-                    log.warn("[CMIS-SYNC] No active book schedule found for object: {}. Skipping snapshot refresh for account: {}", dtuongQly, maKhang);
-                    continue;
-                }
-
-                String snapshotGenUrl = "http://localhost:8082/api/v1/snapshots/generate-for-account?maKhang=" + maKhang 
-                        + "&month=" + month + "&period=" + period + "&ruleId=R-06&bangNguon=bieu_gia&truongThayDoi=chi_tiet_gia";
-                
-                try {
-                    restTemplate.postForEntity(snapshotGenUrl, null, String.class);
-                } catch (Exception ex) {
-                    log.error("[CMIS-SYNC] Failed to trigger snapshot refresh for account: {} due to {}", maKhang, ex.getMessage());
-                }
+            for (Map<String, Object> book : affectedBooks) {
+                String dtuongQly = (String) book.get("dtuong_qly");
+                String month = (String) book.get("thang_ck");
+                int period = ((Number) book.get("ky_chot")).intValue();
+                snapshotEventPublisher.publishBookRecreate(dtuongQly, month, period);
             }
         } catch (Exception e) {
             log.error("[CMIS-SYNC] Error executing batch snapshot updates for tariff {}", maBieuGia, e);

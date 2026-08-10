@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 import org.springframework.web.client.RestTemplate;
 import java.util.Optional;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 
 @Service
 public class CmisQueryService {
@@ -30,7 +31,7 @@ public class CmisQueryService {
     private final RestTemplate restTemplate;
 
     public CmisQueryService() {
-        org.springframework.http.client.SimpleClientHttpRequestFactory factory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
         factory.setConnectTimeout(5000);
         factory.setReadTimeout(15000);
         this.restTemplate = new RestTemplate(factory);

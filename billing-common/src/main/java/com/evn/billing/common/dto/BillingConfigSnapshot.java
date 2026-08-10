@@ -36,6 +36,8 @@ public class BillingConfigSnapshot {
     // hasRelation: REMOVED — luôn = !fastPathEnabled, dư thừa 100%
 
     private String maDviqly; // Mã đơn vị quản lý
+    private Integer phienBanTinh;
+
 
     // SAP IS-U Billing Schema steps
     private List<BillingSchemaStep> schemaSteps;

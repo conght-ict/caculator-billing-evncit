@@ -22,6 +22,9 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
+import java.sql.Date;
+import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 
 @Component
 @Slf4j
@@ -52,9 +55,9 @@ public class OracleAmrIngestionJob {
         public final String bcs;
         public final String maKhang;
         public final String maCto;
-        public final java.math.BigDecimal heSoNhan;
+        public final BigDecimal heSoNhan;
 
-        public PendingReadingTarget(String meterId, String bcs, String maKhang, String maCto, java.math.BigDecimal heSoNhan) {
+        public PendingReadingTarget(String meterId, String bcs, String maKhang, String maCto, BigDecimal heSoNhan) {
             this.meterId = meterId;
             this.bcs = bcs;
             this.maKhang = maKhang;
@@ -116,8 +119,8 @@ public class OracleAmrIngestionJob {
                 int period = ((Number) schedule.get("ky_chot")).intValue();
                 LocalDate denNgay = null;
                 Object denNgayObj = schedule.get("den_ngay");
-                if (denNgayObj instanceof java.sql.Date) {
-                    denNgay = ((java.sql.Date) denNgayObj).toLocalDate();
+                if (denNgayObj instanceof Date) {
+                    denNgay = ((Date) denNgayObj).toLocalDate();
                 } else if (denNgayObj instanceof LocalDate) {
                     denNgay = (LocalDate) denNgayObj;
                 }
@@ -231,7 +234,7 @@ public class OracleAmrIngestionJob {
                 // Calculate Dynamic Throttle Profile based on backlog and SLA
                 long pendingCount = pendingTargets.size();
                 LocalDateTime deadline = denNgay.atTime(17, 0, 0); // 17:00 of denNgay
-                long secondsToSla = java.time.Duration.between(LocalDateTime.now(), deadline).toSeconds();
+                long secondsToSla = Duration.between(LocalDateTime.now(), deadline).toSeconds();
                 
                 com.evn.billing.mediation.config.DynamicIngestionThrottleConfig.IngestionProfile profile = throttleConfig.getProfile(pendingCount, secondsToSla);
                 log.info("[ORACLE-AMR-JOB] Active Ingestion Profile: {} (Pending: {}, Concurrency: {}, BatchSize: {})", 
@@ -371,8 +374,8 @@ public class OracleAmrIngestionJob {
             Map<String, Object> schedule = schedules.get(0);
             LocalDate denNgay = null;
             Object denNgayObj = schedule.get("den_ngay");
-            if (denNgayObj instanceof java.sql.Date) {
-                denNgay = ((java.sql.Date) denNgayObj).toLocalDate();
+            if (denNgayObj instanceof Date) {
+                denNgay = ((Date) denNgayObj).toLocalDate();
             } else if (denNgayObj instanceof LocalDate) {
                 denNgay = (LocalDate) denNgayObj;
             }
@@ -613,7 +616,7 @@ public class OracleAmrIngestionJob {
                 // Set processed cache in Redis
                 String redisKey = "processed:meters:" + month + ":" + period;
                 redisTemplate.opsForSet().add(redisKey, target.meterId + ":" + target.bcs + ":" + target.maCto);
-                redisTemplate.expire(redisKey, 30, java.util.concurrent.TimeUnit.DAYS);
+                redisTemplate.expire(redisKey, 30, TimeUnit.DAYS);
             }
 
             // Write back to PostgreSQL via Repository Bulk Insert

@@ -8,6 +8,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Component;
+import org.apache.kafka.common.header.Header;
 
 /**
  * RetryQueueListener — Non-blocking retry consumer.
@@ -43,7 +44,7 @@ public class RetryQueueListener {
 
         // Kiểm tra notBefore header để quyết định có re-route ngay không
         long notBefore = 0L;
-        org.apache.kafka.common.header.Header header = record.headers().lastHeader("notBefore");
+        Header header = record.headers().lastHeader("notBefore");
         if (header != null) {
             try {
                 notBefore = java.nio.ByteBuffer.wrap(header.value()).getLong();

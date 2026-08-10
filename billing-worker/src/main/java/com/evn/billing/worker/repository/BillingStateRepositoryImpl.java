@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.annotation.Propagation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import com.evn.billing.common.domain.BillInvoice;
 
 import java.math.BigDecimal;
 import java.sql.Timestamp;
@@ -16,6 +17,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.sql.Date;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 
 @Repository
 public class BillingStateRepositoryImpl implements BillingStateRepository {
@@ -77,31 +82,35 @@ public class BillingStateRepositoryImpl implements BillingStateRepository {
     }
 
     @Override
-    public void upsertInvoice(String invoiceId, String maKhang, String dtuongQly, String month, BigDecimal totalBeforeTax, BigDecimal taxAmount, BigDecimal totalAfterTax, String idempotencyKey, String manifestJson, boolean isProrated, String refSnapshot, String status, String maDviqly, Timestamp createdAt, Timestamp updatedAt) {
+    public void upsertInvoice(BillInvoice inv) {
         String insertInvoiceSql = "INSERT INTO hoa_don (" +
-                "id_hoa_don, ma_khang, dtuong_qly, thang_chu_ky, " +
-                "tong_tien_truoc_thue, tien_thue, tong_tien_sau_thue, " +
-                "khoa_lap_trung, ban_ke_tinh_toan, ap_dung_phan_bo, " +
-                "ref_snapshot, trang_thai_tinh_toan, ma_dviqly, created_at, updated_at) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?) " +
-                "ON CONFLICT (khoa_lap_trung, thang_chu_ky) " +
-                "DO UPDATE SET " +
-                "tong_tien_truoc_thue = EXCLUDED.tong_tien_truoc_thue, " +
-                "tien_thue            = EXCLUDED.tien_thue, " +
-                "tong_tien_sau_thue   = EXCLUDED.tong_tien_sau_thue, " +
-                "ban_ke_tinh_toan      = EXCLUDED.ban_ke_tinh_toan, " +
-                "ap_dung_phan_bo     = EXCLUDED.ap_dung_phan_bo, " +
-                "ref_snapshot          = EXCLUDED.ref_snapshot, " +
-                "trang_thai_tinh_toan  = EXCLUDED.trang_thai_tinh_toan, " +
-                "ma_dviqly            = EXCLUDED.ma_dviqly, " +
-                "updated_at            = NOW()";
+                "id_hoa_don, ma_khang, dtuong_qly, thang_chu_ky, ky_chot, ma_dviqly, " +
+                "loai_hdon, ngay_dky, ngay_cky, so_ho, loai_khang, " +
+                "so_tien, tien_gtgt, tyle_thue, tong_tien, dien_tthu, " +
+                "cosfi, kcosfi, chi_tiet_diem_do, " +
+                "khoa_lap_trung, trang_thai_tinh_toan, ref_snapshot, " +
+                "created_at, updated_at) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?) " +
+                "ON CONFLICT (khoa_lap_trung, thang_chu_ky) DO UPDATE SET " +
+                "so_tien = EXCLUDED.so_tien, " +
+                "tien_gtgt = EXCLUDED.tien_gtgt, " +
+                "tong_tien = EXCLUDED.tong_tien, " +
+                "chi_tiet_diem_do = EXCLUDED.chi_tiet_diem_do, " +
+                "ref_snapshot = EXCLUDED.ref_snapshot, " +
+                "trang_thai_tinh_toan = EXCLUDED.trang_thai_tinh_toan, " +
+                "updated_at = NOW()";
 
         jdbcTemplate.update(
                 insertInvoiceSql,
-                invoiceId, maKhang, dtuongQly, month,
-                totalBeforeTax, taxAmount, totalAfterTax,
-                idempotencyKey, manifestJson, isProrated,
-                refSnapshot, status, maDviqly, createdAt, updatedAt
+                inv.getIdHoaDon(), inv.getMaKhang(), inv.getDtuongQly(), inv.getThangChuKy(), inv.getKyChot(), inv.getMaDviqly(),
+                inv.getLoaiHdon(), inv.getNgayDky() != null ? Date.valueOf(inv.getNgayDky()) : null,
+                inv.getNgayCky() != null ? Date.valueOf(inv.getNgayCky()) : null,
+                inv.getSoHo(), inv.getLoaiKhang(),
+                inv.getSoTien(), inv.getTienGtgt(), inv.getTyleThue(), inv.getTongTien(), inv.getDienTthu(),
+                inv.getCosfi(), inv.getKcosfi(), inv.getChiTietDiemDo(),
+                inv.getKhoaLapTrung(), inv.getTrangThaiTinhToan(), inv.getRefSnapshot(),
+                inv.getCreatedAt() != null ? Timestamp.valueOf(inv.getCreatedAt()) : null,
+                inv.getUpdatedAt() != null ? Timestamp.valueOf(inv.getUpdatedAt()) : null
         );
     }
 
@@ -121,25 +130,83 @@ public class BillingStateRepositoryImpl implements BillingStateRepository {
     }
 
     @Override
-    public void batchUpsertInvoices(List<Object[]> invoiceBatch) {
+    public void batchUpsertInvoices(List<BillInvoice> invoiceBatch) {
         String insertInvoiceSql = "INSERT INTO hoa_don (" +
-                "id_hoa_don, ma_khang, dtuong_qly, thang_chu_ky, ky_chot, " +
-                "tong_tien_truoc_thue, tien_thue, tong_tien_sau_thue, " +
-                "khoa_lap_trung, ban_ke_tinh_toan, ap_dung_phan_bo, " +
-                "ref_snapshot, trang_thai_tinh_toan, ma_dviqly, created_at, updated_at) " +
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?) " +
-                "ON CONFLICT (khoa_lap_trung, thang_chu_ky) " +
-                "DO UPDATE SET " +
-                "tong_tien_truoc_thue = EXCLUDED.tong_tien_truoc_thue, " +
-                "tien_thue            = EXCLUDED.tien_thue, " +
-                "tong_tien_sau_thue   = EXCLUDED.tong_tien_sau_thue, " +
-                "ban_ke_tinh_toan      = EXCLUDED.ban_ke_tinh_toan, " +
-                "ap_dung_phan_bo     = EXCLUDED.ap_dung_phan_bo, " +
-                "ref_snapshot          = EXCLUDED.ref_snapshot, " +
-                "trang_thai_tinh_toan  = EXCLUDED.trang_thai_tinh_toan, " +
-                "ma_dviqly            = EXCLUDED.ma_dviqly, " +
-                "updated_at            = NOW()";
-        jdbcTemplate.batchUpdate(insertInvoiceSql, invoiceBatch);
+                "id_hoa_don, ma_khang, dtuong_qly, thang_chu_ky, ky_chot, ma_dviqly, " +
+                "loai_hdon, ngay_dky, ngay_cky, so_ho, loai_khang, " +
+                "so_tien, tien_gtgt, tyle_thue, tong_tien, dien_tthu, " +
+                "cosfi, kcosfi, chi_tiet_diem_do, " +
+                "khoa_lap_trung, trang_thai_tinh_toan, ref_snapshot, " +
+                "created_at, updated_at) " +
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?) " +
+                "ON CONFLICT (khoa_lap_trung, thang_chu_ky) DO UPDATE SET " +
+                "so_tien = EXCLUDED.so_tien, " +
+                "tien_gtgt = EXCLUDED.tien_gtgt, " +
+                "tong_tien = EXCLUDED.tong_tien, " +
+                "chi_tiet_diem_do = EXCLUDED.chi_tiet_diem_do, " +
+                "ref_snapshot = EXCLUDED.ref_snapshot, " +
+                "trang_thai_tinh_toan = EXCLUDED.trang_thai_tinh_toan, " +
+                "updated_at = NOW()";
+
+        jdbcTemplate.batchUpdate(insertInvoiceSql, new BatchPreparedStatementSetter() {
+            @Override
+            public void setValues(PreparedStatement ps, int i) throws SQLException {
+                BillInvoice inv = invoiceBatch.get(i);
+                ps.setString(1, inv.getIdHoaDon());
+                ps.setString(2, inv.getMaKhang());
+                ps.setString(3, inv.getDtuongQly());
+                ps.setString(4, inv.getThangChuKy());
+                ps.setInt(5, inv.getKyChot());
+                ps.setString(6, inv.getMaDviqly());
+                ps.setString(7, inv.getLoaiHdon());
+                ps.setDate(8, inv.getNgayDky() != null ? Date.valueOf(inv.getNgayDky()) : null);
+                ps.setDate(9, inv.getNgayCky() != null ? Date.valueOf(inv.getNgayCky()) : null);
+                ps.setBigDecimal(10, inv.getSoHo());
+                ps.setInt(11, inv.getLoaiKhang());
+                ps.setBigDecimal(12, inv.getSoTien());
+                ps.setBigDecimal(13, inv.getTienGtgt());
+                ps.setBigDecimal(14, inv.getTyleThue());
+                ps.setBigDecimal(15, inv.getTongTien());
+                ps.setBigDecimal(16, inv.getDienTthu());
+                ps.setBigDecimal(17, inv.getCosfi());
+                ps.setBigDecimal(18, inv.getKcosfi());
+                ps.setString(19, inv.getChiTietDiemDo());
+                ps.setString(20, inv.getKhoaLapTrung());
+                ps.setString(21, inv.getTrangThaiTinhToan());
+                ps.setString(22, inv.getRefSnapshot());
+                ps.setTimestamp(23, inv.getCreatedAt() != null ? Timestamp.valueOf(inv.getCreatedAt()) : null);
+                ps.setTimestamp(24, inv.getUpdatedAt() != null ? Timestamp.valueOf(inv.getUpdatedAt()) : null);
+            }
+
+            @Override
+            public int getBatchSize() {
+                return invoiceBatch.size();
+            }
+        });
+    }
+
+    @Override
+    public void insertNhatKyTinhToan(String idHoaDon, String thangChuKy, String maKhang,
+                                      String trangThai, String duLieuDauVao, String ketQua,
+                                      String loi, Long durationMs, String tenWorker) {
+        String sql = "INSERT INTO nhat_ky_tinh_toan (" +
+                "id_hoa_don, thang_chu_ky, ma_khang, trang_thai, du_lieu_dau_vao, " +
+                "ket_qua_tinh_toan, thong_bao_loi, thoi_gian_xu_ly_ms, ten_worker, created_at) " +
+                "VALUES (?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, NOW())";
+        jdbcTemplate.update(sql, idHoaDon, thangChuKy, maKhang, trangThai, duLieuDauVao, ketQua, loi, durationMs, tenWorker);
+    }
+
+    @Override
+    public void updateCmisIdMapping(String idHoaDon, String thangChuKy, Long cmisIdHdon,
+                                     String chiTietDiemDoJson, String syncStatus) {
+        String sql = "UPDATE hoa_don " +
+                "SET cmis_id_hdon = ?, " +
+                "    chi_tiet_diem_do = ?::jsonb, " +
+                "    cmis_sync_status = ?, " +
+                "    cmis_sync_at = NOW(), " +
+                "    updated_at = NOW() " +
+                "WHERE id_hoa_don = ? AND thang_chu_ky = ?";
+        jdbcTemplate.update(sql, cmisIdHdon, chiTietDiemDoJson, syncStatus, idHoaDon, thangChuKy);
     }
 
     @Override

@@ -80,3 +80,13 @@ Dự án được tổ chức theo mô hình Multi-Module Maven và bắt buộc
     *   Các key trong JSON payload dùng dạng `snake_case` tiếng Việt khớp với tên cột DB (ví dụ: `ma_khang`, `dtuong_qly`).
 *   **Cấm dùng `@JsonAlias`**: JSON payload giao tiếp qua API hoặc Kafka phải sử dụng thuần túy key tiếng Việt chuẩn, không sử dụng alias sang tiếng Anh.
 *   **Tên biến cục bộ**: Được phép dùng tiếng Anh ngắn gọn nếu phạm vi (scope) hẹp và mang tính kỹ thuật thuần túy (ví dụ: `i`, `idx`, `sql`, `conn`, `result`). Các biến chứa dữ liệu nghiệp vụ bắt buộc dùng tiếng Việt (ví dụ: `tongTien`, `sanLuongTho`).
+
+---
+
+## 9. Quy Tắc Lập Kế Hoạch Tinh Gọn (Lean Implementation Planning Rule)
+Để tối ưu hóa dung lượng Context Window và tiết kiệm token cho mô hình thực thi (Gemini 3.5 Flash), các tài liệu kế hoạch triển khai (Implementation Plan) được sinh ra bởi Planner Agent bắt buộc phải tuân thủ các quy tắc sau:
+*   **Cấm sao chép code block lớn**: Tuyệt đối không copy-paste toàn bộ file hoặc toàn bộ phương thức dài (trên 30 dòng) vào kế hoạch.
+*   **Sử dụng Link & Tọa độ**: Phải cung cấp đường dẫn file dạng click được (ví dụ: [RetryQueueListener.java](file:///e:/caculator-billing-evncit/billing-worker/src/main/java/com/evn/billing/worker/listener/RetryQueueListener.java)) đi kèm khoảng dòng (Line Numbers) cần sửa đổi.
+*   **Snippet Before/After tinh gọn**: Chỉ hiển thị chính xác các dòng code cần thay đổi bằng định dạng Code Diff hoặc Before/After tối giản, tập trung thuần túy vào logic thay đổi.
+*   **Verify cục bộ**: Hướng dẫn kiểm thử tự động bằng các lệnh maven nhắm mục tiêu (pl - project list) đến các package/class cụ thể thay vì chạy clean build toàn bộ các package không liên quan.
+

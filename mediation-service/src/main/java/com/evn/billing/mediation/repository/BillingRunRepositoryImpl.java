@@ -71,4 +71,16 @@ public class BillingRunRepositoryImpl implements BillingRunRepository {
         String sql = "UPDATE lich_ghi_dqly SET tthai_chay = ?, updated_at = NOW() WHERE dtuong_qly = ? AND thang_ck = ? AND ky_chot = ?";
         jdbcTemplate.update(sql, scheduleRunStatus, dtuongQly, month, period);
     }
+
+    @Override
+    public boolean isSnapshotGenerated(String dtuongQly, String month, int period) {
+        try {
+            Boolean value = jdbcTemplate.queryForObject(
+                    "SELECT snapshot_generated FROM lich_ghi_dqly WHERE dtuong_qly = ? AND thang_ck = ? AND ky_chot = ?",
+                    Boolean.class, dtuongQly, month, period);
+            return value != null && value;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 }

@@ -5,6 +5,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.kafka.config.ConcurrentKafkaListenerContainerFactory;
 import org.springframework.kafka.core.ConsumerFactory;
 import org.springframework.core.task.SimpleAsyncTaskExecutor;
+import org.apache.kafka.clients.admin.NewTopic;
+import org.springframework.kafka.config.TopicBuilder;
 
 @Configuration
 public class KafkaConsumerConfig {
@@ -44,8 +46,8 @@ public class KafkaConsumerConfig {
     }
 
     @Bean
-    public org.apache.kafka.clients.admin.NewTopic meterReadingsInputTopic() {
-        return org.springframework.kafka.config.TopicBuilder.name("meter-readings-input")
+    public NewTopic meterReadingsInputTopic() {
+        return TopicBuilder.name("meter-readings-input")
                 .partitions(32)
                 .replicas(1)
                 .build();

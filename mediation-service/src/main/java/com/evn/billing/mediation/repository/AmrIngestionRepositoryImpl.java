@@ -6,11 +6,19 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 import java.util.Map;
 import java.util.HashMap;
+import java.math.BigDecimal;
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Repository
 public class AmrIngestionRepositoryImpl implements AmrIngestionRepository {
 
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(AmrIngestionRepositoryImpl.class);
+    private static final Logger log = LoggerFactory.getLogger(AmrIngestionRepositoryImpl.class);
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -48,16 +56,16 @@ public class AmrIngestionRepositoryImpl implements AmrIngestionRepository {
     }
 
     @Override
-    public List<Map<String, Object>> findOracleReadings(List<String> meterIds, java.time.LocalDateTime start, java.time.LocalDateTime end) {
-        if (meterIds == null || meterIds.isEmpty()) return java.util.Collections.emptyList();
-        String placeholders = meterIds.stream().map(m -> "?").collect(java.util.stream.Collectors.joining(","));
+    public List<Map<String, Object>> findOracleReadings(List<String> meterIds, LocalDateTime start, LocalDateTime end) {
+        if (meterIds == null || meterIds.isEmpty()) return Collections.emptyList();
+        String placeholders = meterIds.stream().map(m -> "?").collect(Collectors.joining(","));
         String querySql = "SELECT ma_ddo, bcs, chi_so_dau, chi_so_cuoi, ngay_doc, co_quay_vong, san_luong " +
                 "FROM oracle_amr_data " +
                 "WHERE ma_ddo IN (" + placeholders + ") " +
                 "AND ngay_doc >= ? AND ngay_doc <= ?";
-        java.util.List<Object> params = new java.util.ArrayList<>(meterIds);
-        params.add(java.sql.Timestamp.valueOf(start));
-        params.add(java.sql.Timestamp.valueOf(end));
+        List<Object> params = new ArrayList<>(meterIds);
+        params.add(Timestamp.valueOf(start));
+        params.add(Timestamp.valueOf(end));
         return jdbcTemplate.queryForList(querySql, params.toArray());
     }
 
@@ -144,7 +152,7 @@ public class AmrIngestionRepositoryImpl implements AmrIngestionRepository {
             String.class, maKhang
         );
         if (metersRequiringPmax.isEmpty()) {
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         }
 
         List<Map<String, Object>> stackingRelation = jdbcTemplate.queryForList(
@@ -163,9 +171,9 @@ public class AmrIngestionRepositoryImpl implements AmrIngestionRepository {
                 Map<String, Object> err = new HashMap<>();
                 err.put("ma_ddo", "STACKING_GROUP");
                 err.put("error", "Missing Pmax for stacking group of customer: " + maKhang);
-                return java.util.Collections.singletonList(err);
+                return Collections.singletonList(err);
             }
-            return java.util.Collections.emptyList();
+            return Collections.emptyList();
         } else {
             return jdbcTemplate.queryForList(
                 "SELECT d.ma_ddo FROM diem_do d WHERE d.ma_khang = ? AND EXISTS (SELECT 1 FROM jsonb_array_elements(d.thong_tin_cto) elem WHERE jsonb_exists(elem->'danh_sach_bcs', 'PMAX')) " +
@@ -190,7 +198,7 @@ public class AmrIngestionRepositoryImpl implements AmrIngestionRepository {
     }
 
     @Override
-    public java.math.BigDecimal getPreviousPeriodConsumption(String maKhang, String currentMonth, int currentPeriod) {
+    public BigDecimal getPreviousPeriodConsumption(String maKhang, String currentMonth, int currentPeriod) {
         List<Map<String, Object>> latestPeriod = jdbcTemplate.queryForList(
                 "SELECT thang_chu_ky, ky_chot FROM chi_so_dien_nang " +
                 "WHERE ma_khang = ? AND (thang_chu_ky < ? OR (thang_chu_ky = ? AND ky_chot < ?)) " +
@@ -199,21 +207,21 @@ public class AmrIngestionRepositoryImpl implements AmrIngestionRepository {
                 maKhang, currentMonth, currentMonth, currentPeriod
         );
         if (latestPeriod.isEmpty()) {
-            return java.math.BigDecimal.ZERO;
+            return BigDecimal.ZERO;
         }
         String prevMonth = (String) latestPeriod.get(0).get("thang_chu_ky");
         int prevPeriod = ((Number) latestPeriod.get(0).get("ky_chot")).intValue();
         
-        java.math.BigDecimal sum = jdbcTemplate.queryForObject(
+        BigDecimal sum = jdbcTemplate.queryForObject(
                 "SELECT SUM(san_luong_tho) FROM chi_so_dien_nang " +
                 "WHERE ma_khang = ? AND thang_chu_ky = ? AND ky_chot = ? AND trang_thai_xu_ly IN ('VALIDATED', 'PENDING_MANUAL')",
-                java.math.BigDecimal.class, maKhang, prevMonth, prevPeriod
+                BigDecimal.class, maKhang, prevMonth, prevPeriod
         );
-        return sum != null ? sum : java.math.BigDecimal.ZERO;
+        return sum != null ? sum : BigDecimal.ZERO;
     }
 
     @Override
-    public List<java.math.BigDecimal> getHistoricalConsumptions(String maKhang, String currentMonth, int currentPeriod) {
+    public List<BigDecimal> getHistoricalConsumptions(String maKhang, String currentMonth, int currentPeriod) {
         String sql = "SELECT SUM(san_luong_tho) as consumption " +
                 "FROM chi_so_dien_nang " +
                 "WHERE ma_khang = ? AND ( " +
@@ -223,12 +231,12 @@ public class AmrIngestionRepositoryImpl implements AmrIngestionRepository {
                 "GROUP BY thang_chu_ky, ky_chot " +
                 "ORDER BY thang_chu_ky DESC, ky_chot DESC " +
                 "LIMIT 12";
-        List<java.math.BigDecimal> list = jdbcTemplate.query(sql, (rs, rowNum) -> {
-            java.math.BigDecimal val = rs.getBigDecimal("consumption");
-            return val != null ? val : java.math.BigDecimal.ZERO;
+        List<BigDecimal> list = jdbcTemplate.query(sql, (rs, rowNum) -> {
+            BigDecimal val = rs.getBigDecimal("consumption");
+            return val != null ? val : BigDecimal.ZERO;
         }, maKhang, currentMonth, currentMonth, currentPeriod);
         
-        java.util.Collections.reverse(list);
+        Collections.reverse(list);
         return list;
     }
 

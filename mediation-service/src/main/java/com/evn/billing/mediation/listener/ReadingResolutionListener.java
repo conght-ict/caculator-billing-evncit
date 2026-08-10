@@ -16,6 +16,7 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import org.springframework.dao.DataIntegrityViolationException;
+import java.util.Map;
 
 @Component
 public class ReadingResolutionListener {
@@ -74,10 +75,10 @@ public class ReadingResolutionListener {
                     dtuongQly = readingResolutionRepository.findBookByAccountId(event.getMaKhang());
                 }
                 if (dtuongQly != null && !dtuongQly.isEmpty()) {
-                    java.util.Optional<java.util.Map<String, Object>> scheduleOpt =
+                    Optional<Map<String, Object>> scheduleOpt =
                             readingResolutionRepository.findLatestActiveScheduleByBook(dtuongQly);
                     if (scheduleOpt.isPresent()) {
-                        java.util.Map<String, Object> scheduleMap = scheduleOpt.get();
+                        Map<String, Object> scheduleMap = scheduleOpt.get();
                         month = (String) scheduleMap.get("thang_ck");
                         period = ((Number) scheduleMap.get("ky_chot")).intValue();
                     }

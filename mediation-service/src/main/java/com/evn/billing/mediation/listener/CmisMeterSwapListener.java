@@ -9,7 +9,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.web.client.RestTemplate;
+import com.evn.billing.mediation.service.SnapshotEventPublisher;
 
 import java.util.*;
 
@@ -20,8 +20,10 @@ public class CmisMeterSwapListener {
     @Autowired
     private CmisSyncRepository cmisSyncRepository;
 
+    @Autowired
+    private SnapshotEventPublisher snapshotEventPublisher;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final RestTemplate restTemplate = new RestTemplate();
 
     @KafkaListener(
             topics = "cmis-cong-to",
@@ -157,24 +159,8 @@ public class CmisMeterSwapListener {
                 String month = event.containsKey("thang_chu_ky") ? (String) event.get("thang_chu_ky") : null;
                 Integer period = event.containsKey("ky_chot") ? ((Number) event.get("ky_chot")).intValue() : null;
 
-                if (month == null || month.isEmpty() || period == null) {
-                    try {
-                        String dtuongQly = cmisSyncRepository.findDtuongQlyByKhang(maKhang);
-                        Map<String, Object> schedule = cmisSyncRepository.findActiveBookSchedule(dtuongQly);
-                        if (schedule != null) {
-                            if (month == null || month.isEmpty()) {
-                                month = (String) schedule.get("thang_ck");
-                            }
-                            if (period == null) {
-                                period = ((Number) schedule.get("ky_chot")).intValue();
-                            }
-                        }
-                    } catch (Exception e) {
-                        // ignore
-                    }
-                }
-
-                if (month != null && !month.isEmpty() && period != null) {
+                String dtuongQly = cmisSyncRepository.findDtuongQlyByKhang(maKhang);
+                if (dtuongQly != null) {
                     final String finalMonth = month;
                     final Integer finalPeriod = period;
                     if (TransactionSynchronizationManager.isActualTransactionActive()) {
@@ -182,12 +168,12 @@ public class CmisMeterSwapListener {
                             new TransactionSynchronization() {
                                 @Override
                                 public void afterCommit() {
-                                    executeSnapshotRefresh(maKhang, finalMonth, finalPeriod);
+                                    executeSnapshotRefresh(maKhang, dtuongQly, finalMonth, finalPeriod);
                                 }
                             }
                         );
                     } else {
-                        executeSnapshotRefresh(maKhang, finalMonth, finalPeriod);
+                        executeSnapshotRefresh(maKhang, dtuongQly, finalMonth, finalPeriod);
                     }
                 }
             }
@@ -197,12 +183,18 @@ public class CmisMeterSwapListener {
         }
     }
 
-    private void executeSnapshotRefresh(String maKhang, String month, Integer period) {
-        String snapshotGenUrl = "http://localhost:8082/api/v1/snapshots/generate-for-account?maKhang=" + maKhang 
-                + "&month=" + month + "&period=" + period + "&ruleId=R-02&bangNguon=diem_do&truongThayDoi=thong_tin_cto";
+    private void executeSnapshotRefresh(String maKhang, String dtuongQly, String month, Integer period) {
         try {
-            restTemplate.postForEntity(snapshotGenUrl, null, String.class);
-            log.info("[CMIS-METER-SWAP] Re-triggered snapshot refresh for Account: {}", maKhang);
+            if (month != null && !month.isEmpty() && period != null) {
+                snapshotEventPublisher.publishAccountRecreate(maKhang, dtuongQly, month, period, "R-02", "diem_do", "thong_tin_cto");
+            } else {
+                List<Map<String, Object>> schedules = cmisSyncRepository.findActiveBookSchedules(dtuongQly);
+                for (Map<String, Object> schedule : schedules) {
+                    String m = (String) schedule.get("thang_ck");
+                    int p = ((Number) schedule.get("ky_chot")).intValue();
+                    snapshotEventPublisher.publishAccountRecreate(maKhang, dtuongQly, m, p, "R-02", "diem_do", "thong_tin_cto");
+                }
+            }
         } catch (Exception e) {
             log.error("[CMIS-METER-SWAP] Failed to trigger snapshot refresh for Account: {}, error: {}", maKhang, e.getMessage());
         }

@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.PageRequest;
 
 @Component
 @Slf4j
@@ -36,7 +37,8 @@ public class SnapshotGracePeriodJob {
         log.info("[GRACE-PERIOD-JOB] Checking expired pending snapshot changes...");
         try {
             List<PendingSnapshotChange> pendingList = pendingSnapshotChangeRepository
-                    .findByTrangThaiAndGraceExpiresAtLessThanEqual("PENDING", LocalDateTime.now());
+                    .findByTrangThaiAndGraceExpiresAtLessThanEqual("PENDING", LocalDateTime.now(), PageRequest.of(0, 500))
+                    .getContent();
 
             if (pendingList.isEmpty()) {
                 log.info("[GRACE-PERIOD-JOB] No expired pending snapshot changes found.");
@@ -58,6 +60,13 @@ public class SnapshotGracePeriodJob {
                     Optional<BillingAccountSnapshot> snapOpt = snapshotRepository.findByMaKhangAndThangChuKyAndKyChot(maKhang, month, period);
                     if (snapOpt.isPresent()) {
                         BillingAccountSnapshot snap = snapOpt.get();
+                        if (!"LOCKED".equalsIgnoreCase(snap.getTrangThai())) {
+                            log.info("[GRACE-PERIOD-JOB] Snapshot for account: {} is no longer LOCKED (status: {}). Marking pending as PROCESSED.", maKhang, snap.getTrangThai());
+                            pending.setTrangThai("PROCESSED");
+                            pending.setProcessedAt(LocalDateTime.now());
+                            pendingSnapshotChangeRepository.save(pending);
+                            continue;
+                        }
                         snap.setTrangThai("DRAFT");
                         snapshotRepository.save(snap);
                     }

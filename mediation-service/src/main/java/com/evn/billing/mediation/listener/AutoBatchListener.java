@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.HashMap;
 import java.util.Map;
+import com.evn.billing.mediation.service.BatchService;
 
 @Component
 @Slf4j
@@ -24,12 +25,15 @@ public class AutoBatchListener {
     @Autowired
     private Job billingJob;
 
+    @Autowired
+    private BatchService batchService;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @KafkaListener(
             topics = "billing-auto-batch-topic",
             groupId = "auto-batch-trigger-group",
-            properties = "value.deserializer=org.apache.kafka.common.serialization.StringDeserializer"
+            properties = "value.deserializer=StringDeserializer"
     )
     public void listenAutoBatchTrigger(String message) {
         log.info("[AUTO-BATCH-KAFKA] Received auto-batch trigger event: {}", message);
@@ -38,6 +42,12 @@ public class AutoBatchListener {
             String dtuongQly = (String) event.get("dtuongQly");
             String month = (String) event.get("month");
             Integer period = ((Number) event.get("period")).intValue();
+
+            if (batchService.isBookAlreadyCompleted(dtuongQly, month, period)) {
+                log.warn("[AUTO-BATCH-KAFKA] Book: {}, Month: {}, Period: {} already COMPLETED. Skipping duplicate trigger.",
+                        dtuongQly, month, period);
+                return;
+            }
 
             log.info("[AUTO-BATCH-KAFKA] Launching Spring Batch Job automatically for Book: {}, Month: {}, Period: {}", 
                     dtuongQly, month, period);

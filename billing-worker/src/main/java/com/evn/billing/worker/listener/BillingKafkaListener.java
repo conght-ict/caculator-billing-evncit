@@ -12,10 +12,13 @@ import org.springframework.kafka.retrytopic.DltStrategy;
 import org.springframework.retry.annotation.Backoff;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.kafka.support.KafkaHeaders;
-import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Component;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
+import java.util.List;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.common.header.Header;
+import org.springframework.data.redis.core.StringRedisTemplate;
 
 @Component
 public class BillingKafkaListener {
@@ -26,7 +29,7 @@ public class BillingKafkaListener {
     private BillingService billingService;
 
     @Autowired
-    private org.springframework.data.redis.core.StringRedisTemplate redisTemplate;
+    private StringRedisTemplate redisTemplate;
 
     /**
      * Kafka Listener executing calculation tasks in batches.
@@ -38,24 +41,24 @@ public class BillingKafkaListener {
             containerFactory = "kafkaBatchListenerContainerFactory"
     )
     public void listenBillingTasks(
-            java.util.List<org.apache.kafka.clients.consumer.ConsumerRecord<String, BillingTaskDto>> records, 
+            List<ConsumerRecord<String, BillingTaskDto>> records, 
             Acknowledgment ack) {
         long t3Receive = System.currentTimeMillis();
         try {
             log.info("Received billing task batch of size: {}", records.size());
             
-            java.util.List<BillingTaskDto> tasks = new ArrayList<>();
+            List<BillingTaskDto> tasks = new ArrayList<>();
             long totalIngest = 0;
             long totalQueue = 0;
             long totalCount = 0;
 
-            for (org.apache.kafka.clients.consumer.ConsumerRecord<String, BillingTaskDto> record : records) {
+            for (ConsumerRecord<String, BillingTaskDto> record : records) {
                 BillingTaskDto task = record.value();
                 if (task != null) {
                     tasks.add(task);
                     
-                    org.apache.kafka.common.header.Header h1 = record.headers().lastHeader("t1_ingest");
-                    org.apache.kafka.common.header.Header h2 = record.headers().lastHeader("t2_send");
+                    Header h1 = record.headers().lastHeader("t1_ingest");
+                    Header h2 = record.headers().lastHeader("t2_send");
                     if (h1 != null && h2 != null) {
                         try {
                             long t1Ingest = ByteBuffer.wrap(h1.value()).getLong();

@@ -22,6 +22,8 @@ public class BillingTaskDto {
     private String loaiKhang; // SINH_HOAT, NGOAI_SINH_HOAT, MIXED
     private String changeFlags;      // NONE, PRICE_CHANGE, METER_CHANGE, READING_CHANGE, MULTI_CHANGE
     private boolean hasRelation;
+    private Integer snapshotVersion;
+
 
 
     public BillingTaskDto(String maKhang, String dtuongQly, String thangChuKy, int kyChot, int phienBanTinh, String traceId) {

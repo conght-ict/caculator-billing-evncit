@@ -8,4 +8,5 @@ public interface BillingRunRepository {
     void upsertBookRunProcessing(String dtuongQly, String month, int period, int totalAccounts, int alreadyCalculated, String maDviqly);
     void transitionEligibleAccountsToProcessing(String dtuongQly, String month, int period);
     void updateBookRunFinalStatus(String dtuongQly, String month, int period, String scheduleRunStatus);
+    boolean isSnapshotGenerated(String dtuongQly, String month, int period);
 }

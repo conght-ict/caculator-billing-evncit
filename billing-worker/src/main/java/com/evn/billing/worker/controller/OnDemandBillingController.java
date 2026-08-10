@@ -20,6 +20,7 @@ import org.springframework.data.domain.PageRequest;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.Collections;
 
 @RestController
 @RequestMapping("/api/v1/billing")
@@ -117,7 +118,7 @@ public class OnDemandBillingController {
         String month = request.getThangChuKy();
         Integer period = request.getKyChot() != null ? request.getKyChot() : 1;
         String statusesStr = request.getStatuses();
-        List<String> statusesList = statusesStr != null ? Arrays.asList(statusesStr.split(",")) : java.util.Collections.emptyList();
+        List<String> statusesList = statusesStr != null ? Arrays.asList(statusesStr.split(",")) : Collections.emptyList();
         int page = request.getPage() != null ? request.getPage() : 0;
         int size = request.getSize() != null ? request.getSize() : 10;
 

@@ -5,9 +5,13 @@ import com.evn.billing.common.dto.*;
 import com.evn.billing.snapshot.repository.*;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.RedisCallback;
+import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.time.LocalDate;
@@ -15,11 +19,16 @@ import java.time.LocalDateTime;
 import java.math.BigDecimal;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.time.YearMonth;
+import java.util.stream.Collectors;
+import java.util.function.Function;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class SnapshotGeneratorService {
 
-    private static final org.slf4j.Logger log = org.slf4j.LoggerFactory.getLogger(SnapshotGeneratorService.class);
+    private static final Logger log = LoggerFactory.getLogger(SnapshotGeneratorService.class);
 
     @Autowired
     private AccountRepository accountRepository;
@@ -48,8 +57,15 @@ public class SnapshotGeneratorService {
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
 
+    @Autowired
+    @Lazy
+    private SnapshotGeneratorService self;
+
     @Value("${billing.snapshot.default-tariff:TARIFF_SHBT_2023}")
     private String defaultTariffCode;
+
+    @Value("${billing.snapshot.tariff-version-date:20250510}")
+    private String tariffVersionDate;
 
     @Value("#{${billing.snapshot.grace-periods:{'R-01':3,'R-02':1,'R-03':3,'R-06':7,'R-08':5,'R-09':5,'R-11':7}}}")
     private Map<String, Integer> gracePeriods;
@@ -84,7 +100,6 @@ public class SnapshotGeneratorService {
             }
         } catch (Exception e) {
             log.warn("No book schedule found for book: {}, month: {}, period: {}. Using default month bounds: {}", dtuongQly, month, period, e.getMessage());
-            // Fallback parsing from YYYY_MM
             try {
                 String[] parts = month.split("_");
                 int year = Integer.parseInt(parts[0]);
@@ -97,19 +112,70 @@ public class SnapshotGeneratorService {
                     periodToDate = LocalDate.of(year, monthVal, 20);
                 } else {
                     periodFromDate = LocalDate.of(year, monthVal, 21);
-                    periodToDate = LocalDate.of(year, monthVal, java.time.YearMonth.of(year, monthVal).lengthOfMonth());
+                    periodToDate = LocalDate.of(year, monthVal, YearMonth.of(year, monthVal).lengthOfMonth());
                 }
             } catch (Exception ex) {
                 // Keep default
             }
         }
 
+        // Bulk fetch all meter points for this book
+        List<MeterPoint> allMeterPoints = meterPointRepository.findByDtuongQlyAndTrangThai(dtuongQly, "ACTIVE");
+        Map<String, List<MeterPoint>> mpByAccount = allMeterPoints.stream()
+                .collect(Collectors.groupingBy(MeterPoint::getMaKhang));
+
+        List<String> allMeterIds = allMeterPoints.stream().map(MeterPoint::getMaDdo).toList();
+
+        // Bulk fetch all relations for these meter points
+        List<MeterRelation> allRelations = allMeterIds.isEmpty() ? Collections.emptyList()
+                : meterRelationRepository.findRelationsByMeterIds(allMeterIds);
+
+        // Bulk fetch all diem do schedules
+        List<DiemDoSchedule> allDdoSchedules = allMeterIds.isEmpty() ? Collections.emptyList()
+                : diemDoScheduleRepository.findByMaDdoInAndThangCkAndKyChot(allMeterIds, month, period);
+        Map<String, DiemDoSchedule> ddoScheduleMap = allDdoSchedules.stream()
+                .collect(Collectors.toMap(DiemDoSchedule::getMaDdo, Function.identity(), (a, b) -> a));
+
+        // Collect all referenced tariff codes
+        Set<String> allTariffCodes = new HashSet<>();
+        for (MeterPoint mp : allMeterPoints) {
+            if (mp.getDanhSachApGia() != null) {
+                for (TariffConfig tc : mp.getDanhSachApGia()) {
+                    String resolved = resolveTariffCode(tc.getMaNgia(), tc.getMaNhomnn(), tc.getMaCapda());
+                    if (resolved != null) {
+                        allTariffCodes.add(resolved);
+                    }
+                }
+            }
+        }
+
+        // Bulk fetch all referenced tariffs
+        LocalDate now = LocalDate.now();
+        List<Tariff> activeTariffs = allTariffCodes.isEmpty() ? Collections.emptyList()
+                : tariffRepository.findAllById(allTariffCodes).stream()
+                        .filter(t -> "ACTIVE".equals(t.getTrangThai()))
+                        .filter(t -> t.getNgayHieuLuc() == null || !t.getNgayHieuLuc().isAfter(now))
+                        .filter(t -> t.getNgayHetHan() == null || !t.getNgayHetHan().isBefore(now))
+                        .toList();
+        Map<String, Tariff> tariffMap = activeTariffs.stream()
+                .collect(Collectors.toMap(Tariff::getMaNgia, Function.identity()));
+
+        // Bulk fetch old snapshots for versioning and change detection
+        List<BillingAccountSnapshot> oldSnapshots = snapshotRepository.findByDtuongQlyAndThangChuKyAndKyChot(dtuongQly, month, period);
+        Map<String, BillingAccountSnapshot> oldSnapMap = oldSnapshots.stream()
+                .collect(Collectors.toMap(BillingAccountSnapshot::getMaKhang, Function.identity(), (a, b) -> a));
+
         List<BillingAccountSnapshot> snapshots = new ArrayList<>();
         Map<String, BillingConfigSnapshot> cacheUpdates = new HashMap<>();
+        List<PendingSnapshotChange> pendingChanges = new ArrayList<>();
 
         for (Account account : accounts) {
+            BillingAccountSnapshot oldSnap = oldSnapMap.get(account.getMaKhang());
+            
             // Check LOCKED snapshot state
-            if (checkLockedAndLogPending(account.getMaKhang(), month, period, "R-08", "lich_ghi_dqly", "tu_ngay")) {
+            PendingSnapshotChange pending = buildPendingChangeIfLocked(account.getMaKhang(), month, period, "R-08", "lich_ghi_dqly", "tu_ngay", oldSnap);
+            if (pending != null) {
+                pendingChanges.add(pending);
                 continue;
             }
 
@@ -124,15 +190,17 @@ public class SnapshotGeneratorService {
             config.setDenNgay(periodToDate);
 
             // 1. Query meter points for the account
-            List<MeterPoint> meterPoints = meterPointRepository.findByMaKhangAndTrangThai(account.getMaKhang(), "ACTIVE");
+            List<MeterPoint> meterPoints = mpByAccount.getOrDefault(account.getMaKhang(), Collections.emptyList());
             if (meterPoints.isEmpty()) {
                 continue;
             }
             config.setLoaiKhang(meterPoints.get(0).getLoaiKhang());
 
-            // 2. Query relationships for the meter points
-            List<String> meterIds = meterPoints.stream().map(MeterPoint::getMaDdo).toList();
-            List<MeterRelation> relations = meterRelationRepository.findRelationsByMeterIds(meterIds);
+            // 2. Query relationships for the meter points (filter from bulk in-memory)
+            Set<String> accountMeterIds = meterPoints.stream().map(MeterPoint::getMaDdo).collect(Collectors.toSet());
+            List<MeterRelation> relations = allRelations.stream()
+                    .filter(r -> accountMeterIds.contains(r.getMaDdoCha()) || accountMeterIds.contains(r.getMaDdoCon()))
+                    .toList();
 
             // 2.1 Extract pricing rules from MeterPoints (JSONB)
             Map<String, List<PriceApplicationRule>> priceRulesByMeter = new HashMap<>();
@@ -196,11 +264,11 @@ public class SnapshotGeneratorService {
             }
 
             // 3. Build Topology tree containing frozen price rules
-            MeterTopology topology = buildTopology(meterPoints, relations, priceRulesByMeter, month, period);
+            MeterTopology topology = buildTopology(meterPoints, relations, priceRulesByMeter, month, period, ddoScheduleMap);
             config.setMeterTopology(topology);
 
             // 4. Query and Map Tariffs referenced in the pricing rules (using JSONB blocks)
-            Map<String, TariffRules> tariffs = buildTariffs(priceRulesByMeter);
+            Map<String, TariffRules> tariffs = buildTariffs(priceRulesByMeter, tariffMap);
             config.setBieuGia(tariffs);
 
             // 4.1 Set Fast-Path flags
@@ -226,7 +294,6 @@ public class SnapshotGeneratorService {
                     mainTariffCode = singleRules.get(0).getMaNgia();
                 }
             } else {
-                // For complex multi-meter or mixed paths, resolve main tariff from root point
                 if (!topology.getRootPoints().isEmpty()) {
                     mainTariffCode = topology.getRootPoints().get(0).getMaNgia();
                 }
@@ -244,41 +311,81 @@ public class SnapshotGeneratorService {
             config.setSchemaSteps(buildDefaultSchemaSteps(isStepping));
             config.setMaDviqly(account.getMaDviqly());
 
+            // Check config difference for change flags
+            String changeFlags = "NONE";
+            if (oldSnap != null) {
+                changeFlags = determineChangeFlags(oldSnap.getDuLieuCauHinh(), config);
+            }
+            config.setChangeFlags(changeFlags);
+
             // 5. Create Entity Snapshot
             BillingAccountSnapshot snapshot = new BillingAccountSnapshot();
-            String snapshotId = account.getMaKhang() + "_" + month + "_p" + period + "_v1";
+            int nextVersion = oldSnap != null ? oldSnap.getPhienBanTinh() + 1 : 1;
+            String snapshotId = account.getMaKhang() + "_" + month + "_p" + period + "_v" + nextVersion;
             snapshot.setIdSnapshot(snapshotId);
             snapshot.setMaKhang(account.getMaKhang());
             snapshot.setDtuongQly(dtuongQly);
             snapshot.setThangChuKy(month);
             snapshot.setKyChot(period);
-            snapshot.setPhienBanTinh(1);
+            snapshot.setPhienBanTinh(nextVersion);
             snapshot.setNgayDongBoHieuLuc(LocalDate.now());
             snapshot.setMaDviqly(account.getMaDviqly());
+            config.setPhienBanTinh(nextVersion);
             snapshot.setDuLieuCauHinh(config);
             snapshot.setCreatedAt(LocalDateTime.now());
 
             snapshots.add(snapshot);
 
-            // Stage Redis update and execute only after DB commit.
             String cacheKey = "snapshot:" + account.getMaKhang() + ":" + month + ":" + period;
             cacheUpdates.put(cacheKey, config);
         }
 
-        snapshotRepository.saveAll(snapshots);
+        // Chunked Transaction save and Redis Pipeline warm-up
+        int chunkSize = 500;
+        for (int i = 0; i < snapshots.size(); i += chunkSize) {
+            List<BillingAccountSnapshot> chunk = snapshots.subList(i, Math.min(i + chunkSize, snapshots.size()));
+            Map<String, BillingConfigSnapshot> cacheChunk = new HashMap<>();
+            for (BillingAccountSnapshot snap : chunk) {
+                cacheChunk.put("snapshot:" + snap.getMaKhang() + ":" + month + ":" + period, snap.getDuLieuCauHinh());
+            }
+            self.saveSnapshotChunk(chunk, cacheChunk);
+        }
 
-        if (!cacheUpdates.isEmpty()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    for (Map.Entry<String, BillingConfigSnapshot> entry : cacheUpdates.entrySet()) {
-                        try {
-                            redisTemplate.opsForValue().set(entry.getKey(), entry.getValue(), 24, TimeUnit.HOURS);
-                        } catch (Exception e) {
-                            log.warn("Failed to cache snapshot in Redis: {}", e.getMessage());
-                        }
-                    }
-                }
+        if (!pendingChanges.isEmpty()) {
+            pendingSnapshotChangeRepository.saveAll(pendingChanges);
+            log.info("Saved {} pending snapshot changes due to LOCKED status", pendingChanges.size());
+        }
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void saveSnapshotChunk(List<BillingAccountSnapshot> chunk, Map<String, BillingConfigSnapshot> cacheChunk) {
+        snapshotRepository.saveAll(chunk);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                redisPipelinedSet(cacheChunk);
+            }
+        });
+    }
+
+    private void redisPipelinedSet(Map<String, BillingConfigSnapshot> cacheUpdates) {
+        try {
+            redisTemplate.executePipelined((RedisCallback<Object>) connection -> {
+                cacheUpdates.forEach((key, value) -> {
+                    byte[] k = redisTemplate.getStringSerializer().serialize(key);
+                    @SuppressWarnings("unchecked")
+                    byte[] v = ((RedisSerializer<Object>) redisTemplate.getValueSerializer()).serialize(value);
+                    connection.setEx(k, 36 * 3600L, v); // TTL 36h
+                });
+                return null;
+            });
+            log.info("[REDIS-PIPELINE] Bulk cached {} snapshots in 1 round-trip.", cacheUpdates.size());
+        } catch (Exception e) {
+            log.warn("[REDIS-PIPELINE] Pipeline failed, falling back to sequential: {}", e.getMessage());
+            cacheUpdates.forEach((k, v) -> {
+                try {
+                    redisTemplate.opsForValue().set(k, v, 36, TimeUnit.HOURS);
+                } catch (Exception ignored) {}
             });
         }
     }
@@ -286,7 +393,7 @@ public class SnapshotGeneratorService {
     /**
      * Builds hierarchical topology tree from flat database rows and binds price rules.
      */
-    private MeterTopology buildTopology(List<MeterPoint> meterPoints, List<MeterRelation> relations, Map<String, List<PriceApplicationRule>> priceRulesByMeter, String month, Integer period) {
+    private MeterTopology buildTopology(List<MeterPoint> meterPoints, List<MeterRelation> relations, Map<String, List<PriceApplicationRule>> priceRulesByMeter, String month, Integer period, Map<String, DiemDoSchedule> ddoScheduleMap) {
         Map<String, MeterPointNode> nodeMap = new HashMap<>();
         
         // Initialize all nodes
@@ -318,19 +425,15 @@ public class SnapshotGeneratorService {
             node.setLoaiDdo(mp.getLoaiDdo());
             node.setIsDienMt(mp.getIsDienMt());
 
-            // Prioritize meter point schedule (lich_ghi_ddo)
-            try {
-                Optional<DiemDoSchedule> ddoScheduleOpt = diemDoScheduleRepository.findByMaDdoAndThangCkAndKyChot(mp.getMaDdo(), month, period);
-                if (ddoScheduleOpt.isPresent()) {
-                    DiemDoSchedule schedule = ddoScheduleOpt.get();
-                    if (schedule.getTuNgay() != null) {
-                        node.setTuNgay(schedule.getTuNgay());
-                    }
-                    if (schedule.getDenNgay() != null) {
-                        node.setDenNgay(schedule.getDenNgay());
-                    }
+            DiemDoSchedule schedule = ddoScheduleMap.get(mp.getMaDdo());
+            if (schedule != null) {
+                if (schedule.getTuNgay() != null) {
+                    node.setTuNgay(schedule.getTuNgay());
                 }
-            } catch (Exception e) {
+                if (schedule.getDenNgay() != null) {
+                    node.setDenNgay(schedule.getDenNgay());
+                }
+            } else {
                 node.setTuNgay(null);
                 node.setDenNgay(null);
             }
@@ -371,7 +474,7 @@ public class SnapshotGeneratorService {
     /**
      * Builds TariffRules configurations for active tariffs referenced in the pricing rules.
      */
-    private Map<String, TariffRules> buildTariffs(Map<String, List<PriceApplicationRule>> priceRulesByMeter) {
+    private Map<String, TariffRules> buildTariffs(Map<String, List<PriceApplicationRule>> priceRulesByMeter, Map<String, Tariff> tariffMap) {
         List<String> tariffCodes = priceRulesByMeter.values().stream()
                 .flatMap(Collection::stream)
                 .map(PriceApplicationRule::getMaNgia)
@@ -383,35 +486,22 @@ public class SnapshotGeneratorService {
             throw new IllegalStateException("No tariff code mapped from price application rules.");
         }
 
-        List<Tariff> tariffsDb = tariffRepository.findAllById(tariffCodes);
-        LocalDate now = LocalDate.now();
-        // Lọc biểu giá hoạt động và không hết hạn
-        tariffsDb = tariffsDb.stream()
-                .filter(t -> "ACTIVE".equals(t.getTrangThai()))
-                .filter(t -> t.getNgayHieuLuc() == null || !t.getNgayHieuLuc().isAfter(now))
-                .filter(t -> t.getNgayHetHan() == null || !t.getNgayHetHan().isBefore(now))
-                .toList();
-
-        Set<String> foundTariffCodes = tariffsDb.stream().map(Tariff::getMaNgia).collect(java.util.stream.Collectors.toSet());
-        List<String> missingTariffCodes = tariffCodes.stream().filter(code -> !foundTariffCodes.contains(code)).toList();
-        if (!missingTariffCodes.isEmpty()) {
-            throw new IllegalStateException("Missing tariff master data or expired for codes: " + missingTariffCodes);
-        }
-
         Map<String, TariffRules> tariffs = new HashMap<>();
-        for (Tariff t : tariffsDb) {
+        for (String code : tariffCodes) {
+            Tariff t = tariffMap.get(code);
+            if (t == null) {
+                throw new IllegalStateException("Missing tariff master data or expired for code: " + code);
+            }
             TariffRules rules = new TariffRules();
             rules.setLoaiBieuGia(t.getLoaiBieuGia());
             rules.setBacThang(t.isBacThang());
             rules.setDonGiaPhang(t.getDonGiaPhang());
             rules.setBlocks(t.getBlocks() != null ? t.getBlocks() : new ArrayList<>());
-            tariffs.put(t.getMaNgia(), rules);
+            tariffs.put(code, rules);
         }
 
         return tariffs;
     }
-
-
 
     private List<BillingSchemaStep> buildDefaultSchemaSteps(boolean isStepping) {
         List<BillingSchemaStep> steps = new ArrayList<>();
@@ -463,7 +553,21 @@ public class SnapshotGeneratorService {
 
     @Transactional
     public void generateSnapshotForAccount(String maKhang, String month, Integer period, String ruleId, String bangNguon, String truongThayDoi) {
-        if (checkLockedAndLogPending(maKhang, month, period, ruleId, bangNguon, truongThayDoi)) {
+        Optional<BillingAccountSnapshot> oldSnapOpt = snapshotRepository.findByMaKhangAndThangChuKyAndKyChot(maKhang, month, period);
+        
+        if (oldSnapOpt.isPresent()) {
+            BillingAccountSnapshot oldSnap = oldSnapOpt.get();
+            if ("LOCKED".equalsIgnoreCase(oldSnap.getTrangThai())) {
+                checkLockedAndLogPending(maKhang, month, period, ruleId, bangNguon, truongThayDoi, oldSnap);
+                return;
+            }
+            // Idempotency: skip nếu đã generate < 30 giây trước
+            if (oldSnap.getCreatedAt() != null &&
+                    oldSnap.getCreatedAt().isAfter(LocalDateTime.now().minusSeconds(30))) {
+                log.info("[SNAP-IDEMPOTENT] Skip duplicate recreate for account: {} (< 30s)", maKhang);
+                return;
+            }
+        } else if (checkLockedAndLogPending(maKhang, month, period, ruleId, bangNguon, truongThayDoi, null)) {
             return;
         }
 
@@ -506,7 +610,7 @@ public class SnapshotGeneratorService {
                     periodToDate = LocalDate.of(year, monthVal, 20);
                 } else {
                     periodFromDate = LocalDate.of(year, monthVal, 21);
-                    periodToDate = LocalDate.of(year, monthVal, java.time.YearMonth.of(year, monthVal).lengthOfMonth());
+                    periodToDate = LocalDate.of(year, monthVal, YearMonth.of(year, monthVal).lengthOfMonth());
                 }
             } catch (Exception ex) {
                 // Keep default
@@ -523,11 +627,15 @@ public class SnapshotGeneratorService {
         config.setTuNgay(periodFromDate);
         config.setDenNgay(periodToDate);
 
-
         config.setLoaiKhang(meterPoints.get(0).getLoaiKhang());
 
         List<String> meterIds = meterPoints.stream().map(MeterPoint::getMaDdo).toList();
         List<MeterRelation> relations = meterRelationRepository.findRelationsByMeterIds(meterIds);
+
+        List<DiemDoSchedule> allDdoSchedules = meterIds.isEmpty() ? Collections.emptyList()
+                : diemDoScheduleRepository.findByMaDdoInAndThangCkAndKyChot(meterIds, month, period);
+        Map<String, DiemDoSchedule> ddoScheduleMap = allDdoSchedules.stream()
+                .collect(Collectors.toMap(DiemDoSchedule::getMaDdo, Function.identity(), (a, b) -> a));
 
         Map<String, List<PriceApplicationRule>> priceRulesByMeter = new HashMap<>();
         int maxHouseholds = 1;
@@ -588,10 +696,29 @@ public class SnapshotGeneratorService {
             rules.sort(Comparator.comparingInt(PriceApplicationRule::getSoThuTu));
         }
 
-        MeterTopology topology = buildTopology(meterPoints, relations, priceRulesByMeter, month, period);
+        MeterTopology topology = buildTopology(meterPoints, relations, priceRulesByMeter, month, period, ddoScheduleMap);
         config.setMeterTopology(topology);
 
-        Map<String, TariffRules> tariffs = buildTariffs(priceRulesByMeter);
+        // Fetch tariffs for single account in-memory
+        Set<String> accountTariffCodes = new HashSet<>();
+        for (List<PriceApplicationRule> rules : priceRulesByMeter.values()) {
+            for (PriceApplicationRule r : rules) {
+                if (r.getMaNgia() != null) {
+                    accountTariffCodes.add(r.getMaNgia());
+                }
+            }
+        }
+        LocalDate now = LocalDate.now();
+        List<Tariff> activeTariffs = accountTariffCodes.isEmpty() ? Collections.emptyList()
+                : tariffRepository.findAllById(accountTariffCodes).stream()
+                        .filter(t -> "ACTIVE".equals(t.getTrangThai()))
+                        .filter(t -> t.getNgayHieuLuc() == null || !t.getNgayHieuLuc().isAfter(now))
+                        .filter(t -> t.getNgayHetHan() == null || !t.getNgayHetHan().isBefore(now))
+                        .toList();
+        Map<String, Tariff> tariffMap = activeTariffs.stream()
+                .collect(Collectors.toMap(Tariff::getMaNgia, Function.identity()));
+
+        Map<String, TariffRules> tariffs = buildTariffs(priceRulesByMeter, tariffMap);
         config.setBieuGia(tariffs);
 
         boolean isFastPath = (meterPoints.size() == 1) && relations.isEmpty();
@@ -630,7 +757,6 @@ public class SnapshotGeneratorService {
         config.setSchemaSteps(buildDefaultSchemaSteps(isStepping));
         config.setMaDviqly(account.getMaDviqly());
 
-        Optional<BillingAccountSnapshot> oldSnapOpt = snapshotRepository.findByMaKhangAndThangChuKyAndKyChot(account.getMaKhang(), month, period);
         String changeFlags = "NONE";
         if (oldSnapOpt.isPresent()) {
             BillingConfigSnapshot oldConfig = oldSnapOpt.get().getDuLieuCauHinh();
@@ -639,15 +765,17 @@ public class SnapshotGeneratorService {
         config.setChangeFlags(changeFlags);
 
         BillingAccountSnapshot snapshot = new BillingAccountSnapshot();
-        String snapshotId = account.getMaKhang() + "_" + month + "_p" + period + "_v1";
+        int nextVersion = oldSnapOpt.isPresent() ? oldSnapOpt.get().getPhienBanTinh() + 1 : 1;
+        String snapshotId = account.getMaKhang() + "_" + month + "_p" + period + "_v" + nextVersion;
         snapshot.setIdSnapshot(snapshotId);
         snapshot.setMaKhang(account.getMaKhang());
         snapshot.setDtuongQly(dtuongQly);
         snapshot.setThangChuKy(month);
         snapshot.setKyChot(period);
-        snapshot.setPhienBanTinh(1);
+        snapshot.setPhienBanTinh(nextVersion);
         snapshot.setNgayDongBoHieuLuc(LocalDate.now());
         snapshot.setMaDviqly(account.getMaDviqly());
+        config.setPhienBanTinh(nextVersion);
         snapshot.setDuLieuCauHinh(config);
         snapshot.setCreatedAt(LocalDateTime.now());
 
@@ -658,7 +786,7 @@ public class SnapshotGeneratorService {
             @Override
             public void afterCommit() {
                 try {
-                    redisTemplate.opsForValue().set(cacheKey, config, 24, TimeUnit.HOURS);
+                    redisTemplate.opsForValue().set(cacheKey, config, 36, TimeUnit.HOURS); // TTL 36h
                     log.info("Successfully regenerated and cached snapshot for account: {}", maKhang);
                 } catch (Exception e) {
                     log.warn("Failed to cache snapshot in Redis for account: {}", maKhang, e);
@@ -667,10 +795,9 @@ public class SnapshotGeneratorService {
         });
     }
 
-    private boolean checkLockedAndLogPending(String maKhang, String month, Integer period, String ruleId, String bangNguon, String truongThayDoi) {
+    private boolean checkLockedAndLogPending(String maKhang, String month, Integer period, String ruleId, String bangNguon, String truongThayDoi, BillingAccountSnapshot oldSnap) {
         try {
-            Optional<BillingAccountSnapshot> snapOpt = snapshotRepository.findByMaKhangAndThangChuKyAndKyChot(maKhang, month, period);
-            if (snapOpt.isPresent() && "LOCKED".equalsIgnoreCase(snapOpt.get().getTrangThai())) {
+            if (oldSnap != null && "LOCKED".equalsIgnoreCase(oldSnap.getTrangThai())) {
                 log.info("[SNAP-LOCKED] Snapshot for account: {}, month: {}, period: {} is LOCKED. Logging pending change.", maKhang, month, period);
                 
                 PendingSnapshotChange pending = new PendingSnapshotChange();
@@ -690,6 +817,23 @@ public class SnapshotGeneratorService {
             log.error("Error checking LOCKED snapshot state", e);
         }
         return false;
+    }
+
+    private PendingSnapshotChange buildPendingChangeIfLocked(String maKhang, String month, Integer period, String ruleId, String bangNguon, String truongThayDoi, BillingAccountSnapshot oldSnap) {
+        if (oldSnap != null && "LOCKED".equalsIgnoreCase(oldSnap.getTrangThai())) {
+            log.info("[SNAP-LOCKED] Snapshot for account: {}, month: {}, period: {} is LOCKED. Creating pending change.", maKhang, month, period);
+            PendingSnapshotChange pending = new PendingSnapshotChange();
+            pending.setMaKhang(maKhang);
+            pending.setThangChuKy(month);
+            pending.setKyChot(period);
+            pending.setRuleId(ruleId);
+            pending.setBangNguon(bangNguon);
+            pending.setTruongThayDoi(truongThayDoi);
+            pending.setGraceExpiresAt(LocalDateTime.now().plusDays(getGracePeriodDays(ruleId)));
+            pending.setTrangThai("PENDING");
+            return pending;
+        }
+        return null;
     }
 
     private int getGracePeriodDays(String ruleId) {
@@ -736,9 +880,9 @@ public class SnapshotGeneratorService {
         if ("A".equals(maNgia) || "D".equals(maNgia) || maNgia.length() <= 2) {
             String resolvedCapda = "1".equals(maCapda) ? "2" : maCapda;
             if ("A".equals(maNgia)) {
-                return "TARIFF_" + maNhomnn + "_CAPDA" + resolvedCapda + "_20250510";
+                return "TARIFF_" + maNhomnn + "_CAPDA" + resolvedCapda + "_" + tariffVersionDate;
             } else {
-                return "TARIFF_" + maNhomnn + "_" + maNgia + "_CAPDA" + resolvedCapda + "_20250510";
+                return "TARIFF_" + maNhomnn + "_" + maNgia + "_CAPDA" + resolvedCapda + "_" + tariffVersionDate;
             }
         }
         return maNgia;

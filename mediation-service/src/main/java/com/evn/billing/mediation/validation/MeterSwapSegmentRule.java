@@ -6,6 +6,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 import java.util.*;
+import java.time.LocalDate;
 
 @Component
 @Order(30)
@@ -31,8 +32,8 @@ public class MeterSwapSegmentRule implements ValidationRule {
             }
         }
         
-        java.time.LocalDate targetDate = ((java.sql.Date) denNgay).toLocalDate();
-        java.time.LocalDate periodStart = targetDate.minusDays(30);
+        LocalDate targetDate = ((java.sql.Date) denNgay).toLocalDate();
+        LocalDate periodStart = targetDate.minusDays(30);
 
         for (Map<String, Object> mp : meterPoints) {
             String meterPointId = (String) mp.get("ma_ddo");
@@ -55,7 +56,7 @@ public class MeterSwapSegmentRule implements ValidationRule {
             for (Map<String, Object> cto : meterList) {
                 String ctoStatus = (String) cto.get("trang_thai");
                 String ngayThaoStr = (String) cto.get("ngay_thao");
-                java.time.LocalDate ngayThao = ngayThaoStr != null ? java.time.LocalDate.parse(ngayThaoStr) : null;
+                LocalDate ngayThao = ngayThaoStr != null ? LocalDate.parse(ngayThaoStr) : null;
 
                 boolean isActive = "ACTIVE".equalsIgnoreCase(ctoStatus) || (ngayThao != null && !ngayThao.isBefore(periodStart));
                 if (isActive) {
@@ -86,11 +87,11 @@ public class MeterSwapSegmentRule implements ValidationRule {
             return;
         }
 
-        java.time.LocalDate targetDate = config.getDenNgay();
+        LocalDate targetDate = config.getDenNgay();
         if (targetDate == null) {
             throw new IllegalStateException("Snapshot configuration is missing periodToDate for account: " + config.getMaKhang());
         }
-        java.time.LocalDate periodStart = targetDate.minusDays(30);
+        LocalDate periodStart = targetDate.minusDays(30);
 
         if (config.getMeterTopology() == null || config.getMeterTopology().getRootPoints() == null) {
             return;
@@ -101,7 +102,7 @@ public class MeterSwapSegmentRule implements ValidationRule {
         }
     }
 
-    private void checkNodeSwap(com.evn.billing.common.dto.MeterPointNode node, java.time.LocalDate periodStart, String month, int period, List<com.evn.billing.common.domain.MeterUsage> usages, ValidationResult result) {
+    private void checkNodeSwap(com.evn.billing.common.dto.MeterPointNode node, LocalDate periodStart, String month, int period, List<com.evn.billing.common.domain.MeterUsage> usages, ValidationResult result) {
         String meterPointId = node.getMaDdo();
         List<com.evn.billing.common.dto.MeterDetails> activeMeters = node.getActiveMeters();
 
@@ -109,7 +110,7 @@ public class MeterSwapSegmentRule implements ValidationRule {
         if (activeMeters != null) {
             for (com.evn.billing.common.dto.MeterDetails cto : activeMeters) {
                 String ctoStatus = cto.getTrangThai();
-                java.time.LocalDate ngayThao = cto.getNgayThao();
+                LocalDate ngayThao = cto.getNgayThao();
 
                 boolean isActive = "ACTIVE".equalsIgnoreCase(ctoStatus) || (ngayThao != null && !ngayThao.isBefore(periodStart));
                 if (isActive) {

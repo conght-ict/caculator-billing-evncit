@@ -9,8 +9,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.web.client.RestTemplate;
-
+import com.evn.billing.mediation.service.SnapshotEventPublisher;
+import java.util.List;
 import java.util.Map;
 
 @Component
@@ -20,8 +20,10 @@ public class CmisCustomerListener {
     @Autowired
     private CmisSyncRepository cmisSyncRepository;
 
+    @Autowired
+    private SnapshotEventPublisher snapshotEventPublisher;
+
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final RestTemplate restTemplate = new RestTemplate();
 
     @KafkaListener(
             topics = "cmis-khach-hang",
@@ -87,23 +89,17 @@ public class CmisCustomerListener {
                 return;
             }
 
-            String month = null;
-            Integer period = null;
-            Map<String, Object> schedule = cmisSyncRepository.findActiveBookSchedule(dtuongQly);
-            if (schedule != null) {
-                month = (String) schedule.get("thang_ck");
-                period = ((Number) schedule.get("ky_chot")).intValue();
-            } else {
-                log.warn("[CMIS-SYNC] No active book schedule found for object: {}. Skipping snapshot refresh.", dtuongQly);
+            List<Map<String, Object>> schedules = cmisSyncRepository.findActiveBookSchedules(dtuongQly);
+            if (schedules.isEmpty()) {
+                log.warn("[CMIS-SYNC] No active book schedules found for object: {}. Skipping snapshot refresh.", dtuongQly);
                 return;
             }
 
-            String snapshotGenUrl = "http://localhost:8082/api/v1/snapshots/generate-for-account?maKhang=" + maKhang 
-                    + "&month=" + month + "&period=" + period + "&ruleId=" + ruleId + "&bangNguon=" + bangNguon 
-                    + "&truongThayDoi=" + truongThayDoi;
-            
-            restTemplate.postForEntity(snapshotGenUrl, null, String.class);
-            log.info("[CMIS-SYNC] Triggered snapshot update for Account: {}", maKhang);
+            for (Map<String, Object> schedule : schedules) {
+                String month = (String) schedule.get("thang_ck");
+                int period = ((Number) schedule.get("ky_chot")).intValue();
+                snapshotEventPublisher.publishAccountRecreate(maKhang, dtuongQly, month, period, ruleId, bangNguon, truongThayDoi);
+            }
         } catch (Exception e) {
             log.error("[CMIS-SYNC] Failed to trigger snapshot refresh for Account: {}, error: {}", maKhang, e.getMessage());
         }

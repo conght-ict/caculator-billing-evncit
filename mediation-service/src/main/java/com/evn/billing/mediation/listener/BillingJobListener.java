@@ -1,28 +1,18 @@
 package com.evn.billing.mediation.listener;
 
-import com.evn.billing.common.dto.GenerateSnapshotRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.batch.core.JobExecution;
 import org.springframework.batch.core.JobExecutionListener;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.web.client.RestTemplate;
 import com.evn.billing.mediation.repository.BillingRunRepository;
 
 public class BillingJobListener implements JobExecutionListener {
 
     private static final Logger log = LoggerFactory.getLogger(BillingJobListener.class);
-    private final RestTemplate restTemplate = new RestTemplate();
 
     @Autowired
     private BillingRunRepository billingRunRepository;
-
-    @Value("${billing.snapshot.url:http://localhost:8082/snapshot}")
-    private String snapshotServiceUrl;
 
     @Override
     public void beforeJob(JobExecution jobExecution) {
@@ -31,21 +21,12 @@ public class BillingJobListener implements JobExecutionListener {
         Long periodParam = jobExecution.getJobParameters().getLong("period");
         int period = periodParam != null ? periodParam.intValue() : 1;
 
-        log.info("BeforeJob Hook: Triggering snapshot building for Book: {}, Cycle: {}, Period: {}", dtuongQly, month, period);
-        
-        // Fix: Gửi RequestBody JSON thay vì query params, dùng property thay vì System.getenv
-        String url = snapshotServiceUrl + "/api/v1/snapshots/generate";
-        GenerateSnapshotRequest snapshotRequest = new GenerateSnapshotRequest(dtuongQly, month, period);
-        try {
-            log.info("BeforeJob Hook: Calling snapshot-generator at URL: {}", url);
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<GenerateSnapshotRequest> entity = new HttpEntity<>(snapshotRequest, headers);
-            restTemplate.postForEntity(url, entity, String.class);
-            log.info("BeforeJob Hook: Snapshot profile freeze and Redis warmup completed successfully.");
-        } catch (Exception e) {
-            // Fix: Log chi tiết hơn nhưng KHÔNG abort job — worker sẽ tự auto-generate nếu thiếu snapshot
-            log.error("BeforeJob Hook Warning: Snapshot service trigger failed at URL: {}. Error: {}. Worker will attempt on-demand generation.", url, e.getMessage());
+        log.info("BeforeJob Hook: Validating snapshot readiness for Book: {}, Month: {}, Period: {}", dtuongQly, month, period);
+        boolean snapshotGenerated = billingRunRepository.isSnapshotGenerated(dtuongQly, month, period);
+        if (!snapshotGenerated) {
+            log.warn("BeforeJob Hook: Snapshot not pre-generated for book: {}! Worker will fallback to DB configuration lookup.", dtuongQly);
+        } else {
+            log.info("BeforeJob Hook: Snapshot is verified pre-generated and cache is warm.");
         }
 
         // Count total accounts in this Book

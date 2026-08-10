@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.math.BigDecimal;
+import java.util.Map;
 
 @Repository
 public class CmisSyncRepositoryImpl implements CmisSyncRepository {
@@ -153,17 +154,19 @@ public class CmisSyncRepositoryImpl implements CmisSyncRepository {
     @Transactional
     public void upsertDtuongQlySchedule(String dtuongQly, String month, int period, String fromDate, String toDate, int nMinus, int nPlus, int totalAccounts, String maDviqly) {
         String upsertDqlySql = "INSERT INTO lich_ghi_dqly " +
-            "(dtuong_qly, thang_ck, ky_chot, tu_ngay, den_ngay, n_tru, n_cong, tthai_lich, tthai_chay, tong_kh, kh_da_xl, kh_tc, kh_tb, ma_dviqly) " +
-            "VALUES (?, ?, ?, CAST(? AS DATE), CAST(? AS DATE), ?, ?, ?, 'PENDING', ?, 0, 0, 0, ?) " +
+            "(dtuong_qly, thang_ck, ky_chot, tu_ngay, den_ngay, n_tru, n_cong, tthai_lich, tthai_chay, tong_kh, kh_da_xl, kh_tc, kh_tb, ma_dviqly, snapshot_generated) " +
+            "VALUES (?, ?, ?, CAST(? AS DATE), CAST(? AS DATE), ?, ?, ?, 'PENDING', ?, 0, 0, 0, ?, false) " +
             "ON CONFLICT (dtuong_qly, thang_ck, ky_chot) DO UPDATE SET " +
             "tu_ngay = EXCLUDED.tu_ngay, den_ngay = EXCLUDED.den_ngay, n_tru = EXCLUDED.n_tru, n_cong = EXCLUDED.n_cong, " +
-            "tthai_lich = EXCLUDED.tthai_lich, tong_kh = EXCLUDED.tong_kh, ma_dviqly = EXCLUDED.ma_dviqly, updated_at = NOW()";
+            "tthai_lich = EXCLUDED.tthai_lich, tong_kh = EXCLUDED.tong_kh, ma_dviqly = EXCLUDED.ma_dviqly, " +
+            "snapshot_generated = CASE WHEN lich_ghi_dqly.den_ngay <> EXCLUDED.den_ngay THEN false ELSE lich_ghi_dqly.snapshot_generated END, " +
+            "updated_at = NOW()";
         jdbcTemplate.update(upsertDqlySql, dtuongQly, month, period, fromDate, toDate, nMinus, nPlus, "ACTIVE", totalAccounts, maDviqly);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public java.util.Map<String, Object> findActiveBookSchedule(String dtuongQly) {
+    public Map<String, Object> findActiveBookSchedule(String dtuongQly) {
         try {
             return jdbcTemplate.queryForMap(
                      "SELECT thang_ck, ky_chot FROM lich_ghi_dqly WHERE dtuong_qly = ? AND tthai_lich = 'ACTIVE' ORDER BY updated_at DESC LIMIT 1",
@@ -172,4 +175,44 @@ public class CmisSyncRepositoryImpl implements CmisSyncRepository {
             return null;
         }
     }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> findBooksWithUpcomingMeterReadings(int daysAhead) {
+        String sql = "SELECT dtuong_qly, thang_ck, ky_chot, den_ngay FROM lich_ghi_dqly " +
+                     "WHERE den_ngay >= CURRENT_DATE AND den_ngay <= CURRENT_DATE + ? " +
+                     "AND snapshot_generated = false AND tthai_lich = 'ACTIVE'";
+        return jdbcTemplate.queryForList(sql, daysAhead);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> findActiveBookSchedules(String dtuongQly) {
+        try {
+            return jdbcTemplate.queryForList(
+                "SELECT thang_ck, ky_chot FROM lich_ghi_dqly " +
+                "WHERE dtuong_qly = ? AND tthai_lich IN ('ACTIVE','PROCESSING') " +
+                "ORDER BY den_ngay DESC",
+                dtuongQly);
+        } catch (Exception e) {
+            return new java.util.ArrayList<>();
+        }
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> findBooksByTariff(String maBieuGia) {
+        try {
+            return jdbcTemplate.queryForList(
+                "SELECT DISTINCT dd.dtuong_qly, lg.thang_ck, lg.ky_chot " +
+                "FROM diem_do dd " +
+                "JOIN lich_ghi_dqly lg ON lg.dtuong_qly = dd.dtuong_qly AND lg.tthai_lich = 'ACTIVE' " +
+                "WHERE dd.danh_sach_ap_gia::text LIKE ? AND dd.trang_thai = 'ACTIVE'",
+                "%" + maBieuGia + "%"
+            );
+        } catch (Exception e) {
+            return new java.util.ArrayList<>();
+        }
+    }
 }
+

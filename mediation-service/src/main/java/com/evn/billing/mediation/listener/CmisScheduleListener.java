@@ -4,6 +4,7 @@ import com.evn.billing.mediation.repository.CmisSyncRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Component;
@@ -11,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.time.LocalDate;
 
 @Component
 @Slf4j
@@ -21,6 +23,9 @@ public class CmisScheduleListener {
 
     @Autowired
     private KafkaTemplate<String, Object> kafkaTemplate;
+
+    @Value("${billing.snapshot.pre-gen-days:2}")
+    private int snapshotPreGenDays;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -108,7 +113,7 @@ public class CmisScheduleListener {
                 return;
             }
             if (fromDate == null || fromDate.isEmpty()) {
-                fromDate = java.time.LocalDate.now().toString();
+                fromDate = LocalDate.now().toString();
             }
             if (toDate == null || toDate.isEmpty()) {
                 toDate = fromDate;
@@ -132,6 +137,25 @@ public class CmisScheduleListener {
 
                 cmisSyncRepository.upsertDtuongQlySchedule(dtuongQly, month, period, fromDate, toDate, nMinus, nPlus, totalAccounts, maDviqly);
                 log.info("[SCHEDULE-KAFKA] Upserted management object schedule via Repository: {}, Month: {}, Period: {}", dtuongQly, month, period);
+
+                // Trigger pre-gen according to den_ngay (toDate), not tu_ngay
+                try {
+                    LocalDate targetCloseDate = LocalDate.parse(toDate);
+                    long daysUntilClose = java.time.temporal.ChronoUnit.DAYS.between(LocalDate.now(), targetCloseDate);
+                    if (daysUntilClose >= 0 && daysUntilClose <= snapshotPreGenDays) {
+                        Map<String, Object> preGenEvent = new HashMap<>();
+                        preGenEvent.put("dtuong_qly", dtuongQly);
+                        preGenEvent.put("thang_chu_ky", month);
+                        preGenEvent.put("ky_chot", period);
+                        preGenEvent.put("den_ngay", toDate);
+                        preGenEvent.put("trigger_source", "SCHEDULE_ADVANCE");
+                        
+                        kafkaTemplate.send("snapshot-pre-generate-topic", dtuongQly, preGenEvent);
+                        log.info("[PRE-GEN] Triggered snapshot pre-gen for book: {} ({}d before den_ngay={})", dtuongQly, daysUntilClose, toDate);
+                    }
+                } catch (Exception ex) {
+                    log.warn("[PRE-GEN] Failed to check / trigger snapshot pre-gen on schedule event: {}", ex.getMessage());
+                }
             }
         } catch (Exception e) {
             log.error("[SCHEDULE-KAFKA] Failed to process schedule sync event: {}", e.getMessage(), e);

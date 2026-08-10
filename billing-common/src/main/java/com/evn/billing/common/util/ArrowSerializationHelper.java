@@ -18,6 +18,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.time.Instant;
 
 public class ArrowSerializationHelper {
 
@@ -125,10 +126,10 @@ public class ArrowSerializationHelper {
                         dto.setMaDdo(meterPointIdVector.getObject(i).toString());
                     }
                     if (!fromDateVector.isNull(i)) {
-                        dto.setTuNgay(LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(fromDateVector.get(i)), ZoneOffset.UTC));
+                        dto.setTuNgay(LocalDateTime.ofInstant(Instant.ofEpochMilli(fromDateVector.get(i)), ZoneOffset.UTC));
                     }
                     if (!toDateVector.isNull(i)) {
-                        dto.setDenNgay(LocalDateTime.ofInstant(java.time.Instant.ofEpochMilli(toDateVector.get(i)), ZoneOffset.UTC));
+                        dto.setDenNgay(LocalDateTime.ofInstant(Instant.ofEpochMilli(toDateVector.get(i)), ZoneOffset.UTC));
                     }
                     if (!startIndexVector.isNull(i)) {
                         dto.setChiSoDau(startIndexVector.getObject(i));

@@ -7,6 +7,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.util.List;
+import org.springframework.jdbc.core.BatchPreparedStatementSetter;
 
 @Repository
 public class BillingWorkerRepositoryImpl implements BillingWorkerRepository {
@@ -31,7 +32,7 @@ public class BillingWorkerRepositoryImpl implements BillingWorkerRepository {
                     ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?, 'FINAL', ?, NOW(), NOW()) " +
                     "ON CONFLICT (khoa_lap_trung, thang_chu_ky) DO NOTHING";
 
-            jdbcTemplate.batchUpdate(invoiceSql, new org.springframework.jdbc.core.BatchPreparedStatementSetter() {
+            jdbcTemplate.batchUpdate(invoiceSql, new BatchPreparedStatementSetter() {
                 @Override
                 public void setValues(PreparedStatement ps, int i) throws SQLException {
                     InvoiceInsertParam inv = invoices.get(i);
@@ -63,7 +64,7 @@ public class BillingWorkerRepositoryImpl implements BillingWorkerRepository {
                     ") VALUES (?, ?, ?, ?::jsonb, 'PENDING', NOW()) " +
                     "ON CONFLICT (loai_doi_tuong, id_doi_tuong, loai_su_kien) DO NOTHING";
 
-            jdbcTemplate.batchUpdate(outboxSql, new org.springframework.jdbc.core.BatchPreparedStatementSetter() {
+            jdbcTemplate.batchUpdate(outboxSql, new BatchPreparedStatementSetter() {
                 @Override
                 public void setValues(PreparedStatement ps, int i) throws SQLException {
                     OutboxInsertParam event = outboxEvents.get(i);
@@ -93,7 +94,7 @@ public class BillingWorkerRepositoryImpl implements BillingWorkerRepository {
                     "thoi_gian_xu_ly_ms = EXCLUDED.thoi_gian_xu_ly_ms, " +
                     "updated_at = NOW()";
 
-            jdbcTemplate.batchUpdate(statusSql, new org.springframework.jdbc.core.BatchPreparedStatementSetter() {
+            jdbcTemplate.batchUpdate(statusSql, new BatchPreparedStatementSetter() {
                 @Override
                 public void setValues(PreparedStatement ps, int i) throws SQLException {
                     StatusUpdateParam st = statuses.get(i);

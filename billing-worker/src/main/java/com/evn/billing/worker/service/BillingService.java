@@ -19,6 +19,10 @@ import com.evn.billing.worker.repository.BillingStateRepository;
 import com.evn.billing.worker.repository.MeterUsageRepository;
 import com.evn.billing.worker.repository.AccountBillingStatusRepository;
 import com.evn.billing.worker.repository.DtuongQlyScheduleRepository;
+import com.evn.billing.common.domain.BillInvoice;
+import com.evn.billing.common.dto.MeterDetails;
+import com.evn.billing.common.dto.PriceApplicationRule;
+import java.time.LocalDate;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,6 +39,19 @@ import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.sql.Timestamp;
+import java.time.temporal.ChronoUnit;
+import java.time.YearMonth;
+import java.util.stream.Collectors;
+import org.springframework.kafka.core.KafkaTemplate;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
+import org.springframework.http.HttpEntity;
+import io.micrometer.core.instrument.MeterRegistry;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class BillingService {
@@ -66,13 +83,13 @@ public class BillingService {
     private BillingStateRepository billingStateRepository;
  
     @Autowired
-    private org.springframework.kafka.core.KafkaTemplate<String, Object> kafkaTemplate;
+    private KafkaTemplate<String, Object> kafkaTemplate;
 
     @Autowired
     private CauHinhThueRepository cauHinhThueRepository;
 
     @Autowired(required = false)
-    private io.micrometer.core.instrument.MeterRegistry meterRegistry;
+    private MeterRegistry meterRegistry;
 
     private final BillingCalculator billingCalculator = new BillingCalculator();
  
@@ -88,12 +105,9 @@ public class BillingService {
     @Autowired
     private CancelBillingService cancelBillingService;
 
-    @Value("${billing.snapshot.url:http://localhost:8082/snapshot}")
-    private String snapshotServiceUrl;
 
-    private final RestTemplate restTemplate = new RestTemplate();
  
-    private final Map<String, Map<String, String>> localBookStatusCache = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, Map<String, String>> localBookStatusCache = new ConcurrentHashMap<>();
 
     private final String workerNodeId = initWorkerNodeId();
 
@@ -106,7 +120,7 @@ public class BillingService {
         try {
             return java.net.InetAddress.getLocalHost().getHostName();
         } catch (Exception e) {
-            return "worker-" + java.util.UUID.randomUUID();
+            return "worker-" + UUID.randomUUID();
         }
     }
 
@@ -177,7 +191,7 @@ public class BillingService {
             log.info("[WARMUP] Cache warmed for Book: {}, Month: {}, Period: {}. Loaded {} statuses.", dtuongQly, month, period, statusMap.size());
         }
 
-        Map<String, String> localMap = new java.util.concurrent.ConcurrentHashMap<>();
+        Map<String, String> localMap = new ConcurrentHashMap<>();
         try {
             Map<Object, Object> redisHash = redisTemplate.opsForHash().entries(hashKey);
             for (Map.Entry<Object, Object> entry : redisHash.entrySet()) {
@@ -385,7 +399,7 @@ public class BillingService {
             }
             if (minFrom == null) minFrom = LocalDateTime.now().minusDays(30);
             if (maxTo == null) maxTo = LocalDateTime.now();
-            long daysUsed = java.time.temporal.ChronoUnit.DAYS.between(minFrom.toLocalDate(), maxTo.toLocalDate()) + 1;
+            long daysUsed = ChronoUnit.DAYS.between(minFrom.toLocalDate(), maxTo.toLocalDate()) + 1;
 
             // Compute actual days of that billing cycle month
             int daysInMonth = 30;
@@ -394,7 +408,7 @@ public class BillingService {
                     String[] parts = month.split("_");
                     int year = Integer.parseInt(parts[0]);
                     int monthVal = Integer.parseInt(parts[1]);
-                    java.time.YearMonth yearMonth = java.time.YearMonth.of(year, monthVal);
+                    YearMonth yearMonth = YearMonth.of(year, monthVal);
                     daysInMonth = yearMonth.lengthOfMonth();
                 } catch (Exception e) {
                     // Ignore
@@ -406,14 +420,29 @@ public class BillingService {
             BillingConfigSnapshot config = null;
             String changeFlags = task.getChangeFlags() != null ? task.getChangeFlags() : "NONE";
             
-            if ("PRICE_CHANGE".equals(changeFlags) || "METER_CHANGE".equals(changeFlags) || "MULTI_CHANGE".equals(changeFlags)) {
+            boolean needsInvalidate = "PRICE_CHANGE".equals(changeFlags)
+                    || "METER_CHANGE".equals(changeFlags)
+                    || "MULTI_CHANGE".equals(changeFlags);
+
+            if (!needsInvalidate && task.getSnapshotVersion() != null) {
                 try {
-                    redisTemplate.delete(cacheKey);
-                    log.info("[SNAP-INVALIDATE] Invalidated snapshot cache due to config change flag: {}", changeFlags);
+                    Object cachedObj = redisTemplate.opsForValue().get(cacheKey);
+                    if (cachedObj != null) {
+                        BillingConfigSnapshot cached = (cachedObj instanceof BillingConfigSnapshot)
+                                ? (BillingConfigSnapshot) cachedObj
+                                : objectMapper.convertValue(cachedObj, BillingConfigSnapshot.class);
+                        if (cached.getPhienBanTinh() != null && cached.getPhienBanTinh() < task.getSnapshotVersion()) {
+                            needsInvalidate = true;
+                            log.info("[SNAP-STALE] Cache version {} < task required version {}. Force invalidate for account: {}",
+                                    cached.getPhienBanTinh(), task.getSnapshotVersion(), maKhang);
+                        } else {
+                            config = cached;
+                        }
+                    }
                 } catch (Exception e) {
-                    log.warn("Failed to invalidate snapshot cache: {}", e.getMessage());
+                    log.warn("Redis read failure, falling back: {}", e.getMessage());
                 }
-            } else {
+            } else if (!needsInvalidate) {
                 try {
                     Object cachedObj = redisTemplate.opsForValue().get(cacheKey);
                     if (cachedObj != null) {
@@ -424,7 +453,16 @@ public class BillingService {
                         }
                     }
                 } catch (Exception e) {
-                    log.warn("Redis cluster cache offline, falling back to database: {}", e.getMessage());
+                    log.warn("Redis offline: {}", e.getMessage());
+                }
+            }
+
+            if (needsInvalidate) {
+                try {
+                    redisTemplate.delete(cacheKey);
+                    log.info("[SNAP-INVALIDATE] Invalidated snapshot cache for account: {}", maKhang);
+                } catch (Exception e) {
+                    log.warn("Failed to invalidate cache: {}", e.getMessage());
                 }
             }
 
@@ -436,14 +474,34 @@ public class BillingService {
                             .findByMaKhangAndThangChuKyAndKyChotAndPhienBanTinh(maKhang, month, task.getKyChot(), 1);
                 }
                 if (snapshotOpt.isEmpty()) {
-                    log.warn("[SNAP-FALLBACK] No snapshot found for account: {}, version: {}. Triggering on-demand generation...", maKhang, version);
-                    triggerSnapshotGenerationForAccount(maKhang, month, task.getKyChot());
-                    snapshotOpt = snapshotRepository
-                            .findByMaKhangAndThangChuKyAndKyChotAndPhienBanTinh(maKhang, month, task.getKyChot(), 1);
-                    if (snapshotOpt.isEmpty()) {
-                        throw new NoSuchElementException("Snapshot generation failed or returned empty for account: " + maKhang + ", version: " + version);
+                    log.warn("[SNAP-FALLBACK] Sending Kafka recreate for account: {}", maKhang);
+                    kafkaTemplate.send("snapshot-recreate-topic", maKhang, Map.of(
+                        "loai", "ACCOUNT",
+                        "ma_khang", maKhang,
+                        "thang_chu_ky", month,
+                        "ky_chot", task.getKyChot(),
+                        "rule_id", "R-01",
+                        "bang_nguon", "billing_worker",
+                        "truong_thay_doi", "on_demand"
+                    ));
+                    
+                    for (int retry = 0; retry < 3; retry++) {
+                        try {
+                            Thread.sleep(2000L * (retry + 1));
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                        }
+                        snapshotOpt = snapshotRepository
+                                .findByMaKhangAndThangChuKyAndKyChotAndPhienBanTinh(maKhang, month, task.getKyChot(), 1);
+                        if (snapshotOpt.isPresent()) {
+                            break;
+                        }
                     }
-                    log.info("[SNAP-FALLBACK] On-demand snapshot successfully fetched for account: {}", maKhang);
+                    
+                    if (snapshotOpt.isEmpty()) {
+                        throw new NoSuchElementException("No snapshot after on-demand Kafka trigger for account: " + maKhang);
+                    }
+                    log.info("[SNAP-FALLBACK] On-demand snapshot available for account: {}", maKhang);
                 }
                 config = snapshotOpt.get().getDuLieuCauHinh();
                 try {
@@ -546,91 +604,159 @@ public class BillingService {
             log.info("[AUDIT-TRACER] [Account: {}] Step 5.1: Billing engine finished. Total Net Consumption: {}, Total Amount before tax: {}, VAT Tax Amount: {}, Total Amount after tax: {}.", 
                     maKhang, nodeNetConsumptions, totalBeforeTax, taxAmount, totalAfterTax);
 
-            // 5. Construct self-explanatory billing_manifest JSONB [IV.2]
-            Map<String, Object> manifest = new HashMap<>();
-            manifest.put("invoice_id", "INV-" + maKhang + "-" + month + "-v" + version);
-            manifest.put("calculation_engine_version", "v2.1-stable");
-            manifest.put("timestamp", LocalDateTime.now().toString());
-            manifest.put("snapshot_applied", maKhang + "_" + month + "_v" + version);
-
-            Map<String, Object> topologyCalculation = new HashMap<>();
-            List<Map<String, Object>> inputReadings = new ArrayList<>();
-            for (MeterUsage u : usages) {
-                Map<String, Object> ir = new HashMap<>();
-                ir.put("meter_point_id", u.getMaDdo());
-                ir.put("calculation_type", getCalculationType(config, u.getMaDdo()));
-                
-                List<Map<String, Object>> subReadings = new ArrayList<>();
-                Map<String, Object> sub = new HashMap<>();
-                sub.put("seq", u.getLanDocPhu());
-                sub.put("from_date", u.getTuNgay() != null ? u.getTuNgay().toString() : null);
-                sub.put("to_date", u.getDenNgay() != null ? u.getDenNgay().toString() : null);
-                sub.put("start_index", u.getChiSoDau());
-                sub.put("end_index", u.getChiSoCuoi());
-                sub.put("is_rollover", u.getCoQuayVong());
-                sub.put("max_register_value", u.getMaxRegisterSnapshot());
-                sub.put("raw_consumption", u.getConsumption());
-                subReadings.add(sub);
-                
-                ir.put("sub_readings", subReadings);
-                ir.put("total_kwh", u.getConsumption());
-                inputReadings.add(ir);
-            }
-            topologyCalculation.put("input_readings", inputReadings);
-            topologyCalculation.put("node_net_consumptions", nodeNetConsumptions);
-            manifest.put("topology_calculation", topologyCalculation);
-
-            Map<String, Object> breakdown = new HashMap<>();
-            breakdown.put("norms_factor", config.getNormsFactor());
-            
-            List<Map<String, Object>> stepsExecuted = new ArrayList<>();
-            for (Map<String, Object> sd : stepDetails) {
-                Map<String, Object> se = new HashMap<>();
-                se.put("meter_point_id", sd.get("meter_point_id"));
-                se.put("step", sd.get("step"));
-                se.put("kwh_consumed", sd.get("kwh"));
-                se.put("unit_price", sd.get("price"));
-                se.put("amount", sd.get("amount"));
-                stepsExecuted.add(se);
-            }
-            breakdown.put("steps_executed", stepsExecuted);
-            breakdown.put("total_before_tax", totalBeforeTax);
-            manifest.put("rating_breakdown", breakdown);
-
-            Map<String, Object> taxCalc = new HashMap<>();
-            taxCalc.put("vat_rate", vatRate);
-            taxCalc.put("tax_amount_raw", taxAmount);
-            taxCalc.put("rounding_mode", "HALF_UP");
-            taxCalc.put("tax_amount_final", taxAmount);
-            manifest.put("tax_calculation", taxCalc);
-            
-            manifest.put("total_final_amount", totalAfterTax);
-
-            String manifestJson = objectMapper.writeValueAsString(manifest);
+            // 5. Construct the BillInvoice entity instead of self-explanatory manifest
             String invoiceId = "INV-" + maKhang + "-" + month + "-v" + version;
             String idempotencyKey = maKhang + "_" + month + "_p" + task.getKyChot() + "_v" + version;
-
             String maDviqly = config.getMaDviqly();
             if (maDviqly == null || maDviqly.trim().isEmpty()) {
                 throw new IllegalStateException("Cấu hình đóng băng (snapshot) thiếu thông tin mã đơn vị quản lý (maDviqly) bắt buộc.");
             }
 
-            boolean isProrated = proRataFactor.compareTo(BigDecimal.ONE) < 0;
+            // Build chi_tiet_diem_do JSONB array
+            List<Map<String, Object>> ctietList = new ArrayList<>();
+            BigDecimal totalDienTthu = BigDecimal.ZERO;
+            for (MeterUsage u : deduplicatedUsages) {
+                String mId = u.getMaDdo();
+                String bcs = u.getTgianBdien() != null ? u.getTgianBdien() : "KT";
 
-            java.sql.Timestamp nowTs = java.sql.Timestamp.valueOf(LocalDateTime.now());
-            saveInvoiceAtomically(
-                    invoiceId, maKhang, dtuongQly, month,
-                    totalBeforeTax, taxAmount, totalAfterTax,
-                    idempotencyKey, manifestJson, isProrated,
-                    maKhang + "_" + month + "_v" + version,
-                    "FINAL", maDviqly, nowTs, nowTs,
-                    task.getKyChot(), version);
+                MeterPointNode node = findMeterPointNode(config.getMeterTopology().getRootPoints(), mId);
+                PriceApplicationRule matchedRule = null;
+                if (node != null && node.getPriceRules() != null) {
+                    matchedRule = node.getPriceRules().stream()
+                            .filter(r -> bcs.equals(r.getTgianBdien()))
+                            .findFirst()
+                            .orElse(node.getPriceRules().isEmpty() ? null : node.getPriceRules().get(0));
+                }
+
+                String soCto = null;
+                int soPha = 1;
+                Short loaiDdoVal = 1;
+                if (node != null) {
+                    loaiDdoVal = node.getLoaiDdo();
+                    if (node.getActiveMeters() != null && !node.getActiveMeters().isEmpty()) {
+                        MeterDetails meter = node.getActiveMeters().get(0);
+                        soCto = meter.getSoSeri();
+                        soPha = meter.getSoPha();
+                    }
+                    if (soCto == null) {
+                        soCto = node.getMeterSerial();
+                    }
+                }
+                if (soCto == null) {
+                    soCto = u.getMaCto();
+                }
+
+                // Sum step amounts for this point and bcs
+                BigDecimal bcsAmount = BigDecimal.ZERO;
+                BigDecimal bcsKwh = BigDecimal.ZERO;
+                if (result.getStepDetails() != null) {
+                    for (Map<String, Object> sd : result.getStepDetails()) {
+                        String sdMeterId = (String) sd.get("meter_point_id");
+                        String sdTimePeriod = (String) sd.get("time_period");
+                        if (mId.equals(sdMeterId) && bcs.equals(sdTimePeriod)) {
+                            BigDecimal kwh = (BigDecimal) sd.get("kwh");
+                            BigDecimal amt = (BigDecimal) sd.get("amount");
+                            if (kwh != null) bcsKwh = bcsKwh.add(kwh);
+                            if (amt != null) bcsAmount = bcsAmount.add(amt);
+                        }
+                    }
+                }
+
+                if (bcsKwh.compareTo(BigDecimal.ZERO) == 0) {
+                    bcsKwh = u.getConsumption() != null ? u.getConsumption() : BigDecimal.ZERO;
+                }
+
+                BigDecimal donGia = BigDecimal.ZERO;
+                if (bcsKwh.compareTo(BigDecimal.ZERO) > 0) {
+                    donGia = bcsAmount.divide(bcsKwh, 4, RoundingMode.HALF_UP);
+                }
+
+                Map<String, Object> ctiet = new LinkedHashMap<>();
+                ctiet.put("ma_ddo", mId);
+                ctiet.put("bcs", bcs);
+                ctiet.put("tgian_bdien", bcs);
+                ctiet.put("ma_nhomnn", matchedRule != null ? matchedRule.getMaNhomnn() : null);
+                ctiet.put("ma_nn", null);
+                ctiet.put("ma_ngia", matchedRule != null ? matchedRule.getMaNgia() : null);
+                ctiet.put("ma_capda", matchedRule != null ? matchedRule.getMaCapda() : null);
+                ctiet.put("loai_ddo", loaiDdoVal != null ? loaiDdoVal.intValue() : 1);
+                ctiet.put("so_pha", soPha);
+                ctiet.put("so_cto", soCto);
+                ctiet.put("id_chi_so", u.getIdChiSo());
+                ctiet.put("ngay_apdung", config.getNgayHieuLuc() != null ? config.getNgayHieuLuc().toString() : null);
+                ctiet.put("dien_tthu", bcsKwh);
+                ctiet.put("don_gia", donGia);
+                ctiet.put("so_tien", bcsAmount);
+                ctiet.put("ty_le", null);
+                ctiet.put("tien_gtru", null);
+                ctiet.put("tien_goc", null);
+                ctiet.put("dinh_muc", matchedRule != null && matchedRule.getDinhMuc() != null ? matchedRule.getDinhMuc().toString() : null);
+                ctiet.put("loai_dmuc", matchedRule != null ? matchedRule.getLoaiDmuc() : null);
+                ctiet.put("noi_dung", null);
+                ctiet.put("cmis_id_hdonctiet", null);
+
+                ctietList.add(ctiet);
+                totalDienTthu = totalDienTthu.add(bcsKwh);
+            }
+            String chiTietDiemDoJson = objectMapper.writeValueAsString(ctietList);
+
+            // Construct BillInvoice object
+            BillInvoice invoice = new BillInvoice();
+            invoice.setIdHoaDon(invoiceId);
+            invoice.setMaKhang(maKhang);
+            invoice.setDtuongQly(dtuongQly);
+            invoice.setThangChuKy(month);
+            invoice.setKyChot(task.getKyChot());
+            invoice.setMaDviqly(maDviqly);
+            invoice.setSoTien(totalBeforeTax);
+            invoice.setTienGtgt(taxAmount);
+            invoice.setTyleThue(vatRate.multiply(BigDecimal.valueOf(100)));
+            invoice.setTongTien(totalAfterTax);
+            invoice.setDienTthu(totalDienTthu);
+
+            // Set date ranges
+            LocalDate ngayDkyLocalDate = config.getTuNgay() != null ? config.getTuNgay() : minFrom.toLocalDate();
+            LocalDate ngayCkyLocalDate = config.getDenNgay() != null ? config.getDenNgay() : maxTo.toLocalDate();
+            invoice.setNgayDky(ngayDkyLocalDate);
+            invoice.setNgayCky(ngayCkyLocalDate);
+            invoice.setSoHo(config.getSoHo() > 0 ? BigDecimal.valueOf(config.getSoHo()) : BigDecimal.ONE);
+            invoice.setLoaiKhang(config.getLoaiKhang() != null ? config.getLoaiKhang().intValue() : 1);
+            invoice.setLoaiHdon("TD");
+            invoice.setChiTietDiemDo(chiTietDiemDoJson);
+            invoice.setKhoaLapTrung(idempotencyKey);
+            invoice.setTrangThaiTinhToan("FINAL");
+            invoice.setRefSnapshot(maKhang + "_" + month + "_v" + version);
+
+            invoice.setCreatedAt(LocalDateTime.now());
+            invoice.setUpdatedAt(LocalDateTime.now());
+
+            saveInvoiceAtomically(invoice, version);
+
+            // Log raw calculate results into nhat_ky_tinh_toan using BillingLogService (asynchronously)
+            long duration = System.currentTimeMillis() - tStart;
+            Map<String, Object> inputLogMap = new HashMap<>();
+            inputLogMap.put("config", config);
+            inputLogMap.put("consumptions", consumptions);
+            String inputJson = objectMapper.writeValueAsString(inputLogMap);
+
+            Map<String, Object> ratingDump = new HashMap<>();
+            ratingDump.put("totalAmountBeforeTax", totalBeforeTax);
+            ratingDump.put("taxAmount", taxAmount);
+            ratingDump.put("totalAmountAfterTax", totalAfterTax);
+            ratingDump.put("stepDetails", stepDetails);
+            ratingDump.put("meterPointBreakdowns", meterPointBreakdowns);
+            ratingDump.put("nodeNetConsumptions", nodeNetConsumptions);
+            String ratingDumpJson = objectMapper.writeValueAsString(ratingDump);
+
+            billingLogService.enqueueLog(
+                    invoiceId, month, maKhang, "SUCCESS",
+                    inputJson, ratingDumpJson, null, duration, workerNodeId
+            );
 
             // Update calculations tracking statuses
-            long duration = System.currentTimeMillis() - tStart;
             if (meterRegistry != null) {
                 meterRegistry.counter("billing.calculations", "status", "success").increment();
-                meterRegistry.timer("billing.execution.time").record(duration, java.util.concurrent.TimeUnit.MILLISECONDS);
+                meterRegistry.timer("billing.execution.time").record(duration, TimeUnit.MILLISECONDS);
             }
             String targetStatus = "SUCCESS";
             if ("BATCH".equals(task.getTriggeredBy()) || "CMIS".equals(task.getTriggeredBy())) {
@@ -640,18 +766,11 @@ public class BillingService {
             if (statusChanged) {
                 updateBookBillingRunProgress(dtuongQly, month, task.getKyChot(), 1, 1, 0);
             }
-
-            // Enqueue log
-            Map<String, Object> inputLogMap = new HashMap<>();
-            inputLogMap.put("config", config);
-            inputLogMap.put("consumptions", consumptions);
-            String inputJson = objectMapper.writeValueAsString(inputLogMap);
-            billingLogService.enqueueLog(dtuongQly, maKhang, month, task.getKyChot(), targetStatus, inputJson, manifestJson, null);
         } catch (Exception e) {
             long duration = System.currentTimeMillis() - tStart;
             if (meterRegistry != null) {
                 meterRegistry.counter("billing.calculations", "status", "error").increment();
-                meterRegistry.timer("billing.execution.time").record(duration, java.util.concurrent.TimeUnit.MILLISECONDS);
+                meterRegistry.timer("billing.execution.time").record(duration, TimeUnit.MILLISECONDS);
             }
             boolean statusChanged = updateAccountStatus(dtuongQly, maKhang, month, task.getKyChot(), "FAILED", null, e.getMessage(), duration, workerNodeId);
             if (statusChanged) {
@@ -662,7 +781,10 @@ public class BillingService {
             } catch (Exception healEx) {
                 log.error("[BILLING] SelfHealing handleFailure failed for {}: {}", maKhang, healEx.getMessage());
             }
-            billingLogService.enqueueLog(dtuongQly, maKhang, month, task.getKyChot(), "FAILED", null, null, e.getMessage());
+            billingLogService.enqueueLog(
+                    "INV-" + maKhang + "-" + month + "-v" + version, month, maKhang, "FAILED",
+                    null, null, e.getMessage(), duration, workerNodeId
+            );
             log.error("[BILLING] Calculation failed for account {}: {}", maKhang, e.getMessage(), e);
         }
     }
@@ -671,51 +793,84 @@ public class BillingService {
      * FIX-01: KHÔNG có @Transactional ở đây.
      * Tính toán là pure CPU — không giữ DB connection.
      * Chỉ batch write ở cuối mới cần transaction (trong commitBillingBatch).
+     *
+     * FIX-BOOK: Nhóm tasks theo dtuongQly trước khi xử lý để đảm bảo:
+     *  - warmupBookCache() đúng cho từng sổ cước.
+     *  - Redis hash key và progress counter được ghi đúng sổ.
+     *  - checkAndTriggerAutoBatch() không nhầm sổ.
+     * Một Kafka batch có thể chứa KH của nhiều sổ cước khác nhau nếu
+     * producer không partition strict theo dtuongQly.
      */
     public void processBillingBatch(List<BillingTaskDto> tasks) throws Exception {
         if (tasks == null || tasks.isEmpty()) return;
 
-        String firstDtuongQly = tasks.get(0).getDtuongQly();
-        if (firstDtuongQly == null || firstDtuongQly.trim().isEmpty()) {
-            throw new IllegalArgumentException("Dữ liệu task đầu tiên trong lô thiếu thông tin đối tượng quản lý (dtuongQly) bắt buộc.");
+        // Validate: tất cả tasks phải có dtuongQly
+        for (BillingTaskDto t : tasks) {
+            if (t.getDtuongQly() == null || t.getDtuongQly().trim().isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Task trong lô thiếu thông tin đối tượng quản lý (dtuongQly) bắt buộc cho khách hàng: " + t.getMaKhang());
+            }
         }
-        String firstMonth = tasks.get(0).getThangChuKy();
-        int firstPeriod = tasks.get(0).getKyChot();
-
-        warmupBookCache(firstDtuongQly, firstMonth, firstPeriod);
 
         // FIX-03: Cache VAT rate 1 lần cho toàn bộ lô (thay vì 1000 SELECT)
         BigDecimal vatRate = fetchVatRateWithCache();
 
+        // FIX-BOOK: Nhóm tasks theo (dtuongQly + thangChuKy + kyChot)
+        // để đảm bảo warmup, claim, commit đều dùng đúng book key.
+        Map<String, List<BillingTaskDto>> tasksByBook = new LinkedHashMap<>();
+        for (BillingTaskDto task : tasks) {
+            String bookKey = task.getDtuongQly() + ":" + task.getThangChuKy() + ":" + task.getKyChot();
+            tasksByBook.computeIfAbsent(bookKey, k -> new ArrayList<>()).add(task);
+        }
+        log.info("[BATCH-BOOK] Batch of {} tasks grouped into {} book(s): {}",
+                tasks.size(), tasksByBook.size(), tasksByBook.keySet());
+
+        // Xử lý từng nhóm sổ cước độc lập
+        for (Map.Entry<String, List<BillingTaskDto>> entry : tasksByBook.entrySet()) {
+            List<BillingTaskDto> bookTasks = entry.getValue();
+            String dtuongQly = bookTasks.get(0).getDtuongQly();
+            String month = bookTasks.get(0).getThangChuKy();
+            int period = bookTasks.get(0).getKyChot();
+            processBillingBatchForBook(bookTasks, dtuongQly, month, period, vatRate);
+        }
+    }
+
+    /**
+     * Xử lý một nhóm tasks thuộc cùng 1 sổ cước (dtuongQly + thangChuKy + kyChot).
+     * Tách riêng để đảm bảo mọi I/O (warmup, claim, commit, progress) đều dùng đúng book key.
+     */
+    private void processBillingBatchForBook(List<BillingTaskDto> tasks,
+                                            String dtuongQly, String month, int period,
+                                            BigDecimal vatRate) throws Exception {
+
+        warmupBookCache(dtuongQly, month, period);
+
         // FIX-02: Batch claim toàn bộ account trong 1 SQL duy nhất (thay vì N×REQUIRES_NEW)
         List<String> allMaKhangs = tasks.stream()
                 .map(BillingTaskDto::getMaKhang)
-                .collect(java.util.stream.Collectors.toList());
+                .collect(Collectors.toList());
         List<String> claimedAccounts = billingStateRepository.batchClaimProcessingWorkers(
-                allMaKhangs, firstMonth, firstPeriod, workerNodeId, claimTimeoutMinutes);
-        java.util.Set<String> claimedSet = new java.util.HashSet<>(claimedAccounts);
-        log.info("[BATCH-CLAIM] Claimed {}/{} accounts for processing.", claimedAccounts.size(), allMaKhangs.size());
+                allMaKhangs, month, period, workerNodeId, claimTimeoutMinutes);
+        Set<String> claimedSet = new HashSet<>(claimedAccounts);
+        log.info("[BATCH-CLAIM] Book: {}, Claimed {}/{} accounts.", dtuongQly, claimedAccounts.size(), allMaKhangs.size());
 
-        List<Object[]> invoiceBatch = new ArrayList<>();
+        List<BillInvoice> invoiceBatch = new ArrayList<>();
         List<Object[]> outboxBatch = new ArrayList<>();
         List<Object[]> statusBatch = new ArrayList<>();
 
         for (BillingTaskDto task : tasks) {
             String maKhang = task.getMaKhang();
-            String month = task.getThangChuKy();
             int version = task.getPhienBanTinh();
-            String dtuongQly = task.getDtuongQly();
-            if (dtuongQly == null || dtuongQly.trim().isEmpty()) {
-                throw new IllegalArgumentException("Dữ liệu task trong lô thiếu thông tin đối tượng quản lý (dtuongQly) bắt buộc.");
-            }
+            // dtuongQly, month, period đã được xác định từ tham số của method — không redeclare
 
             // FIX-02: Dùng kết quả batch claim thay vì gọi từng lần
             if (!claimedSet.contains(maKhang)) {
                 log.info("[SKIP-CALC-BATCH] Account {} not claimed (already processing/finalized) for month {} period {}.",
-                        maKhang, month, firstPeriod);
+                        maKhang, month, period);
                 continue;
             }
 
+            long tStart = System.currentTimeMillis();
             try {
                 // 1. Get validated usages from Kafka task DTO readings
                 List<MeterUsage> usages = new ArrayList<>();
@@ -759,13 +914,13 @@ public class BillingService {
                 }
                 if (minFrom == null) minFrom = LocalDateTime.now().minusDays(30);
                 if (maxTo == null) maxTo = LocalDateTime.now();
-                long daysUsed = java.time.temporal.ChronoUnit.DAYS.between(minFrom.toLocalDate(), maxTo.toLocalDate()) + 1;
+                long daysUsed = ChronoUnit.DAYS.between(minFrom.toLocalDate(), maxTo.toLocalDate()) + 1;
 
                 int daysInMonth = 30;
                 if (month != null && month.contains("_")) {
                     try {
                         String[] parts = month.split("_");
-                        java.time.YearMonth yearMonth = java.time.YearMonth.of(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
+                        YearMonth yearMonth = YearMonth.of(Integer.parseInt(parts[0]), Integer.parseInt(parts[1]));
                         daysInMonth = yearMonth.lengthOfMonth();
                     } catch (Exception ignored) { }
                 }
@@ -773,15 +928,49 @@ public class BillingService {
                 // 2. Fetch Frozen Snapshot from Redis Cache
                 String cacheKey = "snapshot:" + maKhang + ":" + month + ":" + task.getKyChot();
                 BillingConfigSnapshot config = null;
-                try {
-                    Object cachedObj = redisTemplate.opsForValue().get(cacheKey);
-                    if (cachedObj != null) {
-                        config = cachedObj instanceof BillingConfigSnapshot
-                                ? (BillingConfigSnapshot) cachedObj
-                                : objectMapper.convertValue(cachedObj, BillingConfigSnapshot.class);
+                String changeFlags = task.getChangeFlags() != null ? task.getChangeFlags() : "NONE";
+                boolean needsInvalidate = "PRICE_CHANGE".equals(changeFlags)
+                        || "METER_CHANGE".equals(changeFlags)
+                        || "MULTI_CHANGE".equals(changeFlags);
+
+                if (!needsInvalidate && task.getSnapshotVersion() != null) {
+                    try {
+                        Object cachedObj = redisTemplate.opsForValue().get(cacheKey);
+                        if (cachedObj != null) {
+                            BillingConfigSnapshot cached = (cachedObj instanceof BillingConfigSnapshot)
+                                    ? (BillingConfigSnapshot) cachedObj
+                                    : objectMapper.convertValue(cachedObj, BillingConfigSnapshot.class);
+                            if (cached.getPhienBanTinh() != null && cached.getPhienBanTinh() < task.getSnapshotVersion()) {
+                                needsInvalidate = true;
+                                log.info("[SNAP-STALE-BATCH] Cache version {} < task required version {}. Force invalidate for account: {}",
+                                        cached.getPhienBanTinh(), task.getSnapshotVersion(), maKhang);
+                            } else {
+                                config = cached;
+                            }
+                        }
+                    } catch (Exception e) {
+                        log.warn("Redis read failure for account {}: {}", maKhang, e.getMessage());
                     }
-                } catch (Exception e) {
-                    log.warn("[SNAP-CACHE] Redis offline for account {}: {}", maKhang, e.getMessage());
+                } else if (!needsInvalidate) {
+                    try {
+                        Object cachedObj = redisTemplate.opsForValue().get(cacheKey);
+                        if (cachedObj != null) {
+                            config = cachedObj instanceof BillingConfigSnapshot
+                                    ? (BillingConfigSnapshot) cachedObj
+                                    : objectMapper.convertValue(cachedObj, BillingConfigSnapshot.class);
+                        }
+                    } catch (Exception e) {
+                        log.warn("[SNAP-CACHE] Redis offline for account {}: {}", maKhang, e.getMessage());
+                    }
+                }
+
+                if (needsInvalidate) {
+                    try {
+                        redisTemplate.delete(cacheKey);
+                        log.info("[SNAP-INVALIDATE-BATCH] Invalidated cache for account: {}", maKhang);
+                    } catch (Exception e) {
+                        log.warn("Failed to invalidate cache: {}", e.getMessage());
+                    }
                 }
 
                 if (config == null) {
@@ -804,7 +993,7 @@ public class BillingService {
                 }
 
                 // FIX-05: Đồng bộ FastPath routing với processBilling() single mode
-                String changeFlags = task.getChangeFlags() != null ? task.getChangeFlags() : "NONE";
+                changeFlags = task.getChangeFlags() != null ? task.getChangeFlags() : "NONE";
                 boolean isFastPath = "NONE".equals(changeFlags)
                         && !task.isHasRelation()
                         && config.isFastPathEnabled()
@@ -921,23 +1110,131 @@ public class BillingService {
                 manifest.put("tax_calculation", taxCalcMap);
                 manifest.put("total_final_amount", totalAfterTax);
 
-                String manifestJson = objectMapper.writeValueAsString(manifest);
                 String idempotencyKey = maKhang + "_" + month + "_p" + task.getKyChot() + "_v" + version;
-                boolean isProrated = (BigDecimal.valueOf(daysUsed).compareTo(BigDecimal.valueOf(daysInMonth)) < 0) && daysUsed > 0;
                 String maDviqly = config.getMaDviqly();
                 if (maDviqly == null || maDviqly.trim().isEmpty()) {
                     throw new IllegalStateException("Cấu hình đóng băng (snapshot) thiếu thông tin mã đơn vị quản lý (maDviqly) bắt buộc.");
                 }
 
-                invoiceBatch.add(new Object[] {
-                    invoiceId, maKhang, dtuongQly, month, task.getKyChot(),
-                    totalBeforeTax, taxAmount, totalAfterTax,
-                    idempotencyKey, manifestJson, isProrated,
-                    maKhang + "_" + month + "_p" + task.getKyChot() + "_v" + version,
-                    "FINAL", maDviqly,
-                    java.sql.Timestamp.valueOf(LocalDateTime.now()),
-                    java.sql.Timestamp.valueOf(LocalDateTime.now())
-                });
+                // Build chi_tiet_diem_do JSONB array
+                List<Map<String, Object>> ctietList = new ArrayList<>();
+                BigDecimal totalDienTthu = BigDecimal.ZERO;
+                for (MeterUsage u : deduplicatedUsages) {
+                    String mId = u.getMaDdo();
+                    String bcs = u.getTgianBdien() != null ? u.getTgianBdien() : "KT";
+
+                    MeterPointNode node = findMeterPointNode(config.getMeterTopology().getRootPoints(), mId);
+                    PriceApplicationRule matchedRule = null;
+                    if (node != null && node.getPriceRules() != null) {
+                        matchedRule = node.getPriceRules().stream()
+                                .filter(r -> bcs.equals(r.getTgianBdien()))
+                                .findFirst()
+                                .orElse(node.getPriceRules().isEmpty() ? null : node.getPriceRules().get(0));
+                    }
+
+                    String soCto = null;
+                    int soPha = 1;
+                    Short loaiDdoVal = 1;
+                    if (node != null) {
+                        loaiDdoVal = node.getLoaiDdo();
+                        if (node.getActiveMeters() != null && !node.getActiveMeters().isEmpty()) {
+                            MeterDetails meter = node.getActiveMeters().get(0);
+                            soCto = meter.getSoSeri();
+                            soPha = meter.getSoPha();
+                        }
+                        if (soCto == null) {
+                            soCto = node.getMeterSerial();
+                        }
+                    }
+                    if (soCto == null) {
+                        soCto = u.getMaCto();
+                    }
+
+                    // Sum step amounts for this point and bcs
+                    BigDecimal bcsAmount = BigDecimal.ZERO;
+                    BigDecimal bcsKwh = BigDecimal.ZERO;
+                    if (result.getStepDetails() != null) {
+                        for (Map<String, Object> sd : result.getStepDetails()) {
+                            String sdMeterId = (String) sd.get("meter_point_id");
+                            String sdTimePeriod = (String) sd.get("time_period");
+                            if (mId.equals(sdMeterId) && bcs.equals(sdTimePeriod)) {
+                                BigDecimal kwh = (BigDecimal) sd.get("kwh");
+                                BigDecimal amt = (BigDecimal) sd.get("amount");
+                                if (kwh != null) bcsKwh = bcsKwh.add(kwh);
+                                if (amt != null) bcsAmount = bcsAmount.add(amt);
+                            }
+                        }
+                    }
+
+                    if (bcsKwh.compareTo(BigDecimal.ZERO) == 0) {
+                        bcsKwh = u.getConsumption() != null ? u.getConsumption() : BigDecimal.ZERO;
+                    }
+
+                    BigDecimal donGia = BigDecimal.ZERO;
+                    if (bcsKwh.compareTo(BigDecimal.ZERO) > 0) {
+                        donGia = bcsAmount.divide(bcsKwh, 4, RoundingMode.HALF_UP);
+                    }
+
+                    Map<String, Object> ctiet = new LinkedHashMap<>();
+                    ctiet.put("ma_ddo", mId);
+                    ctiet.put("bcs", bcs);
+                    ctiet.put("tgian_bdien", bcs);
+                    ctiet.put("ma_nhomnn", matchedRule != null ? matchedRule.getMaNhomnn() : null);
+                    ctiet.put("ma_nn", null);
+                    ctiet.put("ma_ngia", matchedRule != null ? matchedRule.getMaNgia() : null);
+                    ctiet.put("ma_capda", matchedRule != null ? matchedRule.getMaCapda() : null);
+                    ctiet.put("loai_ddo", loaiDdoVal != null ? loaiDdoVal.intValue() : 1);
+                    ctiet.put("so_pha", soPha);
+                    ctiet.put("so_cto", soCto);
+                    ctiet.put("id_chi_so", u.getIdChiSo());
+                    ctiet.put("ngay_apdung", config.getNgayHieuLuc() != null ? config.getNgayHieuLuc().toString() : null);
+                    ctiet.put("dien_tthu", bcsKwh);
+                    ctiet.put("don_gia", donGia);
+                    ctiet.put("so_tien", bcsAmount);
+                    ctiet.put("ty_le", null);
+                    ctiet.put("tien_gtru", null);
+                    ctiet.put("tien_goc", null);
+                    ctiet.put("dinh_muc", matchedRule != null && matchedRule.getDinhMuc() != null ? matchedRule.getDinhMuc().toString() : null);
+                    ctiet.put("loai_dmuc", matchedRule != null ? matchedRule.getLoaiDmuc() : null);
+                    ctiet.put("noi_dung", null);
+                    ctiet.put("cmis_id_hdonctiet", null);
+
+                    ctietList.add(ctiet);
+                    totalDienTthu = totalDienTthu.add(bcsKwh);
+                }
+                String chiTietDiemDoJson = objectMapper.writeValueAsString(ctietList);
+
+                // Construct BillInvoice object
+                BillInvoice invoice = new BillInvoice();
+                invoice.setIdHoaDon(invoiceId);
+                invoice.setMaKhang(maKhang);
+                invoice.setDtuongQly(dtuongQly);
+                invoice.setThangChuKy(month);
+                invoice.setKyChot(task.getKyChot());
+                invoice.setMaDviqly(maDviqly);
+                invoice.setSoTien(totalBeforeTax);
+                invoice.setTienGtgt(taxAmount);
+                invoice.setTyleThue(vatRate.multiply(BigDecimal.valueOf(100)));
+                invoice.setTongTien(totalAfterTax);
+                invoice.setDienTthu(totalDienTthu);
+
+                // Set date ranges
+                LocalDate ngayDkyLocalDate = config.getTuNgay() != null ? config.getTuNgay() : minFrom.toLocalDate();
+                LocalDate ngayCkyLocalDate = config.getDenNgay() != null ? config.getDenNgay() : maxTo.toLocalDate();
+                invoice.setNgayDky(ngayDkyLocalDate);
+                invoice.setNgayCky(ngayCkyLocalDate);
+                invoice.setSoHo(config.getSoHo() > 0 ? BigDecimal.valueOf(config.getSoHo()) : BigDecimal.ONE);
+                invoice.setLoaiKhang(config.getLoaiKhang() != null ? config.getLoaiKhang().intValue() : 1);
+                invoice.setLoaiHdon("TD");
+                invoice.setChiTietDiemDo(chiTietDiemDoJson);
+                invoice.setKhoaLapTrung(idempotencyKey);
+                invoice.setTrangThaiTinhToan("FINAL");
+                invoice.setRefSnapshot(maKhang + "_" + month + "_v" + version);
+
+                invoice.setCreatedAt(LocalDateTime.now());
+                invoice.setUpdatedAt(LocalDateTime.now());
+
+                invoiceBatch.add(invoice);
 
                 Map<String, Object> outboxPayload = new HashMap<>();
                 outboxPayload.put("invoiceId", invoiceId);
@@ -950,47 +1247,65 @@ public class BillingService {
                 outboxBatch.add(new Object[] {
                     UUID.randomUUID(), "INVOICE", invoiceId, "INVOICE_CREATED",
                     objectMapper.writeValueAsString(outboxPayload),
-                    java.sql.Timestamp.valueOf(LocalDateTime.now())
+                    Timestamp.valueOf(LocalDateTime.now())
                 });
 
                 String targetStatus = "SUCCESS";
                 if ("BATCH".equals(task.getTriggeredBy()) || "CMIS".equals(task.getTriggeredBy())) {
                     targetStatus = "SUCCESS_CMIS";
                 }
-                if (totalBeforeTax != null && totalBeforeTax.compareTo(java.math.BigDecimal.valueOf(anomalyThresholdVnd)) > 0) {
+                if (totalBeforeTax != null && totalBeforeTax.compareTo(BigDecimal.valueOf(anomalyThresholdVnd)) > 0) {
                     targetStatus = "ANOMALY";
                 }
                 statusBatch.add(new Object[] {
                     maKhang, month, dtuongQly, task.getKyChot(),
                     targetStatus, invoiceId, null, workerNodeId,
-                    java.sql.Timestamp.valueOf(LocalDateTime.now())
+                    Timestamp.valueOf(LocalDateTime.now())
                 });
 
                 Map<String, Object> inputLogMap = new HashMap<>();
                 inputLogMap.put("config", config);
                 inputLogMap.put("consumptions", consumptions);
-                billingLogService.enqueueLog(dtuongQly, maKhang, month, task.getKyChot(), targetStatus,
-                        objectMapper.writeValueAsString(inputLogMap), manifestJson, null);
+                String inputJson = objectMapper.writeValueAsString(inputLogMap);
+
+                Map<String, Object> ratingDump = new HashMap<>();
+                ratingDump.put("totalAmountBeforeTax", totalBeforeTax);
+                ratingDump.put("taxAmount", taxAmount);
+                ratingDump.put("totalAmountAfterTax", totalAfterTax);
+                ratingDump.put("stepDetails", stepDetails);
+                ratingDump.put("meterPointBreakdowns", result.getMeterPointBreakdowns());
+                ratingDump.put("nodeNetConsumptions", nodeNetConsumptions);
+                String ratingDumpJson = objectMapper.writeValueAsString(ratingDump);
+
+                long duration = System.currentTimeMillis() - tStart;
+                billingLogService.enqueueLog(
+                        invoiceId, month, maKhang, targetStatus,
+                        inputJson, ratingDumpJson, null, duration, workerNodeId
+                );
 
             } catch (Exception e) {
                 log.error("Calculation failed for account: {}, error: {}", maKhang, e.getMessage(), e);
                 statusBatch.add(new Object[] {
                     maKhang, month, dtuongQly, task.getKyChot(),
                     "FAILED", null, e.getMessage(), workerNodeId,
-                    java.sql.Timestamp.valueOf(LocalDateTime.now())
+                    Timestamp.valueOf(LocalDateTime.now())
                 });
                 try {
                     selfHealingService.handleFailure(task, e.getMessage());
                 } catch (Exception healEx) {
                     log.error("[BILLING-BATCH] SelfHealing handleFailure failed for {}: {}", maKhang, healEx.getMessage());
                 }
-                billingLogService.enqueueLog(dtuongQly, maKhang, month, task.getKyChot(), "FAILED", null, null, e.getMessage());
+                long duration = System.currentTimeMillis() - tStart;
+                billingLogService.enqueueLog(
+                        "INV-" + maKhang + "-" + month + "-v" + version, month, maKhang, "FAILED",
+                        null, null, e.getMessage(), duration, workerNodeId
+                );
             }
         }
 
         // FIX-01: Batch writes trong transaction ngắn riêng — tách hoàn toàn khỏi tính toán
         if (!invoiceBatch.isEmpty() || !statusBatch.isEmpty()) {
-            commitBillingBatch(invoiceBatch, outboxBatch, statusBatch, firstDtuongQly, firstMonth, firstPeriod);
+            commitBillingBatch(invoiceBatch, outboxBatch, statusBatch, dtuongQly, month, period);
         }
     }
 
@@ -1000,7 +1315,7 @@ public class BillingService {
      * Kafka sẽ replay lô này và idempotency (ON CONFLICT DO UPDATE) đảm bảo không duplicate.
      */
     @Transactional
-    public void commitBillingBatch(List<Object[]> invoiceBatch, List<Object[]> outboxBatch,
+    public void commitBillingBatch(List<BillInvoice> invoiceBatch, List<Object[]> outboxBatch,
                                     List<Object[]> statusBatch, String dtuongQly, String month, int period) {
         if (!invoiceBatch.isEmpty()) {
             billingStateRepository.batchUpsertInvoices(invoiceBatch);
@@ -1226,8 +1541,8 @@ public class BillingService {
         return result;
     }
  
-    public org.springframework.data.domain.Page<AccountBillingStatus> getAccountsByStatus(
-            String dtuongQly, String month, int period, List<String> statuses, org.springframework.data.domain.Pageable pageable) {
+    public Page<AccountBillingStatus> getAccountsByStatus(
+            String dtuongQly, String month, int period, List<String> statuses, Pageable pageable) {
         return accountBillingStatusRepository.findByDtuongQlyAndThangChuKyAndKyChotAndTrangThaiIn(dtuongQly, month, period, statuses, pageable);
     }
 
@@ -1370,60 +1685,44 @@ public class BillingService {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void saveInvoiceAtomically(
-            String invoiceId, String maKhang, String dtuongQly, String month,
-            BigDecimal totalBeforeTax, BigDecimal taxAmount, BigDecimal totalAfterTax,
-            String idempotencyKey, String manifestJson, boolean isProrated,
-            String refSnapshot, String status, String maDviqly,
-            java.sql.Timestamp createdAt, java.sql.Timestamp updatedAt,
-            int kyChot, int version) {
-        billingStateRepository.upsertInvoice(
-                invoiceId, maKhang, dtuongQly, month,
-                totalBeforeTax, taxAmount, totalAfterTax,
-                idempotencyKey, manifestJson, isProrated,
-                refSnapshot, status, maDviqly, createdAt, updatedAt);
-        billingStateRepository.lockSnapshot(maKhang, month, kyChot, version);
+    public void saveInvoiceAtomically(BillInvoice invoice, int version) {
+        billingStateRepository.upsertInvoice(invoice);
+        billingStateRepository.lockSnapshot(invoice.getMaKhang(), invoice.getThangChuKy(), invoice.getKyChot(), version);
         
         // Construct outbox event payload
         Map<String, Object> outboxPayload = new HashMap<>();
-        outboxPayload.put("invoiceId", invoiceId);
-        outboxPayload.put("maKhang", maKhang);
-        outboxPayload.put("billingCycleMonth", month);
-        outboxPayload.put("amountBeforeTax", totalBeforeTax);
-        outboxPayload.put("taxAmount", taxAmount);
-        outboxPayload.put("amountAfterTax", totalAfterTax);
+        outboxPayload.put("invoiceId", invoice.getIdHoaDon());
+        outboxPayload.put("maKhang", invoice.getMaKhang());
+        outboxPayload.put("billingCycleMonth", invoice.getThangChuKy());
+        outboxPayload.put("amountBeforeTax", invoice.getSoTien());
+        outboxPayload.put("taxAmount", invoice.getTienGtgt());
+        outboxPayload.put("amountAfterTax", invoice.getTongTien());
         outboxPayload.put("timestamp", LocalDateTime.now().toString());
 
         try {
             billingStateRepository.insertOutboxEvent(
-                    UUID.randomUUID(), "INVOICE", invoiceId, "INVOICE_CREATED",
-                    objectMapper.writeValueAsString(outboxPayload), java.sql.Timestamp.valueOf(LocalDateTime.now()));
+                    UUID.randomUUID(), "INVOICE", invoice.getIdHoaDon(), "INVOICE_CREATED",
+                    objectMapper.writeValueAsString(outboxPayload), Timestamp.valueOf(LocalDateTime.now()));
         } catch (Exception ex) {
             throw new RuntimeException("Failed to serialize outbox event payload", ex);
         }
         
-        log.info("[AUDIT-TRACER] [Account: {}] Step 6: Atomic transaction committed. Invoice + Outbox + Snapshot lock.", maKhang);
+        log.info("[AUDIT-TRACER] [Account: {}] Step 6: Atomic transaction committed. Invoice + Outbox + Snapshot lock.", invoice.getMaKhang());
     }
 
-    /**
-     * Gọi snapshot-generator REST API để tạo snapshot cho 1 account cụ thể.
-     * Được gọi khi worker không tìm thấy snapshot trong Redis/DB.
-     */
-    private void triggerSnapshotGenerationForAccount(String maKhang, String month, int period) {
-        String url = snapshotServiceUrl + "/api/v1/snapshots/generate-for-account";
-        log.info("[SNAP-FALLBACK] Triggering on-demand snapshot generation for account: {} at URL: {}", maKhang, url);
-        try {
-            GenerateAccountSnapshotRequest request = new GenerateAccountSnapshotRequest();
-            request.setMaKhang(maKhang);
-            request.setThangChuKy(month);
-            request.setKyChot(period);
-            org.springframework.http.HttpHeaders headers = new org.springframework.http.HttpHeaders();
-            headers.setContentType(org.springframework.http.MediaType.APPLICATION_JSON);
-            org.springframework.http.HttpEntity<GenerateAccountSnapshotRequest> entity = new org.springframework.http.HttpEntity<>(request, headers);
-            restTemplate.postForEntity(url, entity, String.class);
-            log.info("[SNAP-FALLBACK] On-demand snapshot generation completed for account: {}", maKhang);
-        } catch (Exception e) {
-            log.error("[SNAP-FALLBACK] Failed to trigger on-demand snapshot generation for account: {}. Error: {}", maKhang, e.getMessage());
+
+
+    private MeterPointNode findMeterPointNode(List<MeterPointNode> nodes, String maDdo) {
+        if (nodes == null || nodes.isEmpty()) return null;
+        for (MeterPointNode node : nodes) {
+            if (maDdo.equals(node.getMaDdo())) {
+                return node;
+            }
+            MeterPointNode found = findMeterPointNode(node.getChildPoints(), maDdo);
+            if (found != null) {
+                return found;
+            }
         }
+        return null;
     }
 }

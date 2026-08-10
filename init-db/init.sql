@@ -36,12 +36,16 @@ CREATE TABLE lich_ghi_dqly (
     kh_tc               INT DEFAULT 0,
     kh_tb               INT DEFAULT 0,
     nguon               VARCHAR(20) DEFAULT 'CMIS',
+    snapshot_generated  BOOLEAN NOT NULL DEFAULT FALSE,
+    snapshot_generated_at TIMESTAMP,
     
     created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (dtuong_qly, thang_ck, ky_chot),
     CONSTRAINT chk_lich_dqly_dates CHECK (den_ngay >= tu_ngay)
 );
+
+CREATE INDEX idx_lich_dqly_den_ngay ON lich_ghi_dqly(den_ngay, snapshot_generated);
 
 -- 3. Điểm Đo (Tối ưu hóa ZERO JOIN: Công tơ và Áp giá dạng JSONB)
 CREATE TABLE dm_loai_ddo (
@@ -248,16 +252,37 @@ CREATE TABLE hoa_don (
     dtuong_qly              VARCHAR(50) NOT NULL,
     thang_chu_ky            VARCHAR(20) NOT NULL,
     ky_chot                 INT NOT NULL DEFAULT 1,
-    tong_tien_truoc_thue    DECIMAL(15,2) NOT NULL,
-    tien_thue               DECIMAL(15,2) NOT NULL,
-    tong_tien_sau_thue      DECIMAL(15,2) NOT NULL,
-    ma_dviqly               VARCHAR(20) NOT NULL DEFAULT 'PD0600', -- [MỚI] Mã đơn vị quản lý
+    ma_dviqly               VARCHAR(20) NOT NULL DEFAULT 'PD0600',
 
-    khoa_lap_trung           VARCHAR(200) NOT NULL, -- idempotency_key
-    ban_ke_tinh_toan        JSONB NOT NULL, -- Manifest chi tiết bậc thang, thuế, phân bổ
-    ap_dung_phan_bo         BOOLEAN NOT NULL DEFAULT FALSE,
-    ref_snapshot            VARCHAR(200),
+    cmis_id_hdon            BIGINT,
+    cmis_sync_status        VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    cmis_sync_at            TIMESTAMP,
+
+    loai_hdon               VARCHAR(2) NOT NULL DEFAULT 'TD',
+    ngay_dky                DATE NOT NULL,
+    ngay_cky                DATE NOT NULL,
+    so_ho                   DECIMAL(8,2) NOT NULL DEFAULT 1,
+    loai_khang              SMALLINT NOT NULL,
+    ma_nhom_khang           VARCHAR(5),
+
+    so_tien                 DECIMAL(15,2) NOT NULL,
+    tien_gtgt               DECIMAL(15,2) NOT NULL,
+    tyle_thue               DECIMAL(5,2) NOT NULL,
+    tong_tien               DECIMAL(15,2) NOT NULL,
+    dien_tthu               DECIMAL(15,2) NOT NULL,
+    tien_td                 DECIMAL(15,2),
+    thue_td                 DECIMAL(15,2),
+    tien_vc                 DECIMAL(15,2),
+    thue_vc                 DECIMAL(15,2),
+    tien_gtru               DECIMAL(15,2),
+    tien_goc                DECIMAL(15,2),
+    cosfi                   DECIMAL(8,3),
+    kcosfi                  DECIMAL(8,3),
+
+    chi_tiet_diem_do        JSONB,
+    khoa_lap_trung          VARCHAR(200) NOT NULL,
     trang_thai_tinh_toan    VARCHAR(20) NOT NULL DEFAULT 'FINAL',
+    ref_snapshot            VARCHAR(200),
 
     created_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -495,18 +520,20 @@ CREATE INDEX idx_lich_xu_ly_lai_hen ON lich_xu_ly_lai(trang_thai, thoi_gian_thu_
 
 -- 13. Nhật Ký Tính Toán (Lưu chi tiết các lần tính cước thành công/thất bại)
 CREATE TABLE nhat_ky_tinh_toan (
-    id_log          UUID PRIMARY KEY,
-    dtuong_qly      VARCHAR(50) NOT NULL,
-    ma_khang        VARCHAR(50) NOT NULL,
-    thang_chu_ky    VARCHAR(20) NOT NULL,
-    ky_chot         INT NOT NULL,
-    trang_thai      VARCHAR(20) NOT NULL,
-    du_lieu_vao     JSONB,
-    du_lieu_ra      JSONB,
-    thong_bao_loi   TEXT,
-    created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    id_nhat_ky          BIGSERIAL PRIMARY KEY,
+    id_hoa_don          VARCHAR(100) NOT NULL,
+    thang_chu_ky        VARCHAR(20)  NOT NULL,
+    ma_khang            VARCHAR(50)  NOT NULL,
+    trang_thai          VARCHAR(20)  NOT NULL,
+    du_lieu_dau_vao     JSONB,
+    ket_qua_tinh_toan   JSONB,
+    thong_bao_loi       TEXT,
+    thoi_gian_xu_ly_ms  BIGINT,
+    ten_worker          VARCHAR(100),
+    created_at          TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
-CREATE INDEX idx_nhat_ky_tinh_toan_lookup ON nhat_ky_tinh_toan(ma_khang, thang_chu_ky, ky_chot);
+CREATE INDEX idx_nhatky_hoadon ON nhat_ky_tinh_toan(id_hoa_don, thang_chu_ky);
+CREATE INDEX idx_nhatky_khang  ON nhat_ky_tinh_toan(ma_khang, thang_chu_ky);
 
 -- 14. Nhật Ký Chỉ Số (Lifecycle logging cho Ingestion/Validation - Partitioned)
 CREATE TABLE nhat_ky_chi_so (

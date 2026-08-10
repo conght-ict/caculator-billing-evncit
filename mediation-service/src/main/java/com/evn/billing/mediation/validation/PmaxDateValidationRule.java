@@ -8,6 +8,7 @@ import java.sql.Timestamp;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.time.LocalDateTime;
 
 @Component
 @Order(60)
@@ -76,7 +77,7 @@ public class PmaxDateValidationRule implements ValidationRule {
             if (maKhang.equals(u.getMaKhang()) && month.equals(u.getThangChuKy()) && period == u.getKyChot() && !"REPLACED".equals(u.getTrangThaiXuLy())) {
                 String bcs = u.getTgianBdien();
                 if (bcs != null && bcs.equalsIgnoreCase("PMAX")) {
-                    java.time.LocalDateTime denNgay = u.getDenNgay();
+                    LocalDateTime denNgay = u.getDenNgay();
                     if (denNgay != null) {
                         LocalDate pmaxDate = denNgay.toLocalDate();
                         if (pmaxDate.getYear() != targetYear || pmaxDate.getMonthValue() != targetMonth) {

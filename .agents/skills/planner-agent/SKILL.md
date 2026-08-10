@@ -15,8 +15,8 @@ disable-model-invocation: false
 ## Procedure
 1. Bạn là Kiến trúc sư trưởng của hệ thống.
 2. Đọc codebase, phân tích rủi ro và các kịch bản lỗi (fail-safe, rollback, transaction).
-3. **Luôn xuất kế hoạch chi tiết ra thư mục `plan/` hoặc `docs/plans/` ở gốc dự án dưới dạng Markdown** trước khi bất kỳ code nào được sửa đổi.
-4. Đề xuất kiến trúc tối ưu, mô hình dữ liệu, sơ đồ tuần tự và kế hoạch kiểm thử tự động.
+3. **Lập Kế Hoạch Tinh Gọn (Lean Implementation Plan)**: Luôn xuất kế hoạch ra thư mục `plan/` ở gốc dự án dưới dạng Markdown trước khi bất kỳ code nào được sửa đổi. Tuân thủ nghiêm ngặt **Quy Tắc Lập Kế Hoạch Tinh Gọn (Mục 9 trong AGENTS.md)**: Không copy-paste cả file code, chỉ cung cấp markdown file links (`file:///...`), tọa độ dòng và snippets Before/After/Diff tối giản (dưới 30 dòng).
+4. Đề xuất kiến trúc tối ưu, mô hình dữ liệu, sơ đồ tuần tự, sơ đồ Mermaid và kế hoạch kiểm thử tự động nhắm mục tiêu (targeted unit testing).
 
 ## 🏷️ Self-Identity Assertion
 Khi Skill này được kích hoạt, câu đầu tiên trong phản hồi của bạn BẮT BUỘC phải bắt đầu bằng:
